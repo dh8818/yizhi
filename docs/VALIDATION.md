@@ -88,6 +88,21 @@ POST /api/analyses          → 201，返回 srv-8836b05b0dd4 与完整 fields/r
 GET  /api/standards/GB 18401 → found:true, verified:true, 现行, 发布 2011-01-14 / 实施 2011-08-01
 ```
 
+网页演示版（`web-demo/` + GitHub Pages）真实浏览器验证：
+
+```
+线上地址                      https://dh8818.github.io/yizhi/     → HTTP 200
+yizhi-core.js（188,523 字节）  → HTTP 200，window.YizhiCore 可加载
+分析页（示例C 牛仔裤）          → 结论卡渲染；冲突疑点「纤维成分在不同来源中说法不一致」正确出现；
+                                缺尺码表 ⇒ 未给尺码；信息完整度 60%（部分完整）
+对比页                        → 2 件商品 11 行 × 3 列表格 + 偏好建议
+标准页                        → 搜索命中 GB 18401-2010，详情 9 行，官方链接指向 openstd 详情页
+知识库                        → 纤维条目可搜索、可展开
+```
+
+> 网页版与小程序共用 `miniprogram/core/`：`scripts/build-web.js` 把 core 打包成单文件
+> `web-demo/yizhi-core.js`，页面只做表单与渲染，所以两端的规则、措辞、数据结构完全一致。
+
 ## 四、已实现但**未验证**
 
 | 项目 | 原因 | 影响 |
