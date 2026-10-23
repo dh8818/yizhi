@@ -139,6 +139,7 @@ const CATEGORY_KEYWORDS = [
   ['羽绒服', ['羽绒服', '鹅绒', '鸭绒']],
   ['大衣', ['大衣', '毛呢外套']],
   ['风衣', ['风衣', 'trench']],
+  ['夹克', ['夹克', '工装外套', '冲锋衣', '机车服', '飞行员夹克']],
   ['西装', ['西装', '西服', 'blazer']],
   ['羊毛衫', ['羊毛衫', '毛衣', '针织衫', '羊绒衫']],
   ['卫衣', ['卫衣', '连帽衫']],
@@ -149,8 +150,9 @@ const CATEGORY_KEYWORDS = [
   ['牛仔裤', ['牛仔裤', '牛仔']],
   ['休闲裤', ['休闲裤', '长裤', '西裤', '工装裤']],
   ['短裤', ['短裤', '五分裤']],
-  ['运动裤', ['运动裤', '束脚裤']],
+  ['运动裤', ['运动裤', '束脚裤', '瑜伽裤', '紧身裤', '打底裤']],
   ['瑜伽/运动紧身衣', ['瑜伽', '紧身', '速干']],
+  ['外套', ['外套', '棉服', '派克', '滑雪服']],
   ['内衣', ['内衣', '文胸', 'bra']],
   ['袜品', ['袜子', '袜']],
   ['围巾/披肩', ['围巾', '披肩']]
@@ -1382,6 +1384,7 @@ const { assessWeight, assessYarnCount } = require('./fabric');
 const knowledge = require('./knowledge');
 const { assessFit } = require('./fit');
 const { computeCompleteness, buildDoubts } = require('./rules');
+const { buildWearReport } = require('./wear/analyze');
 
 const DISCLAIMER =
   '本卡基于你上传的图片做信息整理与规则提示，不是检测报告，也不构成质量、真伪或合规判定。' +
@@ -1418,7 +1421,8 @@ function buildReport(input) {
   const fabricNotes = knowledge.composeFabricNotes(fiberItems);
   const care = knowledge.explainCare(hasValue(fields.care_instructions) ? fields.care_instructions.normalized_value : '');
   const fit = assessFit({ fields, profile });
-  const doubts = buildDoubts({ fields, standard, weight, fit, completeness, rawText });
+  const wear = buildWearReport({ fields, rawText, profile });
+  const doubts = buildDoubts({ fields, standard, weight, fit, wear, completeness, rawText });
 
   const conclusion = buildConclusion({ fields, completeness, standard, doubts, weight, fit });
 
@@ -1427,6 +1431,7 @@ function buildReport(input) {
     standardSection(standard),
     fabricSection({ fields, weight, yarn, fabricNotes }),
     fitSection(fit),
+    wearSection(wear),
     doubtSection(doubts),
     careSection({ fields, care, fiberItems })
   ];
@@ -1458,8 +1463,9 @@ function buildReport(input) {
     doubts: doubts.items,
     doubt_counts: doubts.counts,
     questions: doubts.questions,
+    wear,
     evidence: buildEvidence(fields),
-    limits: buildLimits({ completeness, standard, weight, fit }),
+    limits: buildLimits({ completeness, standard, weight, fit, wear }),
     disclaimer: DISCLAIMER,
     standard,
     fit,
@@ -1605,6 +1611,27 @@ function fitSection(fit) {
   };
 }
 
+function wearSection(wear) {
+  return {
+    key: 'wear',
+    title: wear.title,
+    subtitle: wear.subtitle,
+    available: wear.available,
+    summary: wear.summary,
+    counts: wear.counts,
+    items: wear.items,
+    timeline: wear.timeline,
+    appearance: wear.appearance,
+    regions: wear.regions,
+    evidence_gaps: wear.evidence_gaps,
+    seller_questions: wear.seller_questions,
+    features: wear.features,
+    disclaimer: wear.disclaimer,
+    confidence_note: wear.confidence_note,
+    updated_at: wear.updated_at
+  };
+}
+
 function doubtSection(doubts) {
   return {
     key: 'doubts',
@@ -1730,7 +1757,7 @@ function buildEvidence(fields) {
   });
 }
 
-function buildLimits({ completeness, standard, weight, fit }) {
+function buildLimits({ completeness, standard, weight, fit, wear }) {
   const limits = [
     '只分析你上传的图片内容；图片没拍到的，系统不会补',
     '识别结果可能出错，标注"已识别"的字段也需要你对照原图复核',
@@ -1741,6 +1768,10 @@ function buildLimits({ completeness, standard, weight, fit }) {
   if (!standard.registry_match) limits.push('该标准号未在本地官方核验库中查到，状态未核验');
   if (weight.status !== 'reference_only') limits.push('没有可用的克重同类参考，未做厚薄评级');
   if (fit.status !== 'heuristic') limits.push('缺尺码表或个人尺寸，未给出具体尺码建议');
+  if (wear && wear.counts && wear.counts.insufficient > 0) {
+    limits.push(`老化风险中 ${wear.counts.insufficient} 项因缺少材料/结构/检测信息标为「证据不足」，这不等于低风险`);
+  }
+  limits.push('老化与耐久提示来自文字描述与通用工艺知识，没有做任何耐洗、耐磨、抗起球或色牢度测试');
   limits.push('本系统没有同类产品样本库，因此不提供"品质评分"或"性价比排名"');
   return limits;
 }
@@ -3781,6 +3812,28 @@ function buildDoubts(ctx) {
     });
   }
 
+  /* 14b. 老化风险：只在高风险时提示，避免与「穿久了会怎么样？」区块重复 */
+  const wear = ctx && ctx.wear;
+  if (wear && wear.available) {
+    const high = wear.items.filter((i) => i.overall_risk === 'high');
+    if (high.length) {
+      push({
+        id: 'wear-high-risk',
+        severity: 'attention',
+        category: '长期穿着',
+        title: `「${high[0].garment_area}」存在需要重点核实的老化风险：${high[0].item_name}`,
+        reason:
+          `${high[0].possible_failure}。` +
+          (high[0].evidence_level === 'observed_defect'
+            ? '这是图片/描述中**已经存在**的迹象，不是预测。'
+            : '这是基于已识别结构与材料的风险提示，不是实测结论。'),
+        basis: (high[0].evidence || []).map((e) => ({ type: 'feature', field_name: e.label, raw_text: e.text, status: 'extracted' })),
+        action: '看「穿久了会怎么样？」区块：那里写了成因、影响程度、判断置信度与补图/询问建议。',
+        question: (high[0].seller_questions && high[0].seller_questions[0]) || null
+      });
+    }
+  }
+
   /* 15. 其余关键字段缺失：只对没被上面具体规则覆盖的字段给一条通用提示 */
   const leftover = completeness.key_missing.filter((k) => !covered.has(k));
   if (leftover.length) {
@@ -3823,6 +3876,1351 @@ function buildDoubts(ctx) {
 }
 
 module.exports = { computeCompleteness, buildDoubts, CLAIM_RULES, SEVERITY_ORDER };
+
+  };
+  defs["core/wear/analyze.js"] = function (module, exports, require) {
+/**
+ * wear/analyze.js —— 长期穿着与老化风险分析。
+ *
+ * 输入：已合并的字段（fields）+ OCR 原文（rawText）+ 用户偏好（profile，可选）
+ * 输出：风险条目（18 个字段）、时间轴、长期外观、区域分布、补图建议、一句话总结。
+ *
+ * 硬性约束（对应规范 §9 / §12 / §14）：
+ *   - 证据不足时 overall_risk = insufficient_evidence，绝不默认"低风险"；
+ *   - likelihood 与 impact 分开表达：某一项未知就单独标 unknown，不强行合并成"综合分"；
+ *   - 不生成未校准的综合分数，不给具体寿命/洗涤次数/概率；
+ *   - 已存在的损伤（observed_defect）与未来可能的变化分开表述；
+ *   - 所有措辞面向普通消费者，不做质量指控。
+ */
+
+'use strict';
+
+const { hasValue } = require('../fields');
+const { detectFeatures } = require('./features');
+const { RULES, CATEGORY_REGIONS, UPDATED_AT } = require('./rules');
+
+const IMPACT_MATRIX = {
+  high: { high: 'high', medium: 'high', low: 'medium' },
+  medium: { high: 'high', medium: 'medium', low: 'low' },
+  low: { high: 'medium', medium: 'low', low: 'low' }
+};
+
+const LEVEL_LABEL = {
+  high: '高风险',
+  medium: '中风险',
+  low: '低风险',
+  insufficient: '证据不足',
+  unknown: '无法判断'
+};
+
+const CONFIDENCE_LABEL = {
+  high: '较高',
+  medium: '中等',
+  low: '较低',
+  unknown: '无法判断'
+};
+
+const SEVERITY_ORDER = { high: 0, medium: 1, insufficient: 2, low: 3 };
+
+/* ───────────────── 事实收集 ───────────────── */
+
+function materialFacts(fields) {
+  const fiber = fields.fiber_composition;
+  const hasFiber = Boolean(fiber && hasValue(fiber));
+  const items = fiber && fiber.parsed && Array.isArray(fiber.parsed.items) ? fiber.parsed.items : [];
+  const weight = fields.fabric_weight && hasValue(fields.fabric_weight) && fields.fabric_weight.unit === 'g/m²'
+    ? Number(fields.fabric_weight.normalized_value)
+    : null;
+  return {
+    has_fiber: hasFiber,
+    fiber_text: hasFiber ? String(fiber.normalized_value) : null,
+    fiber_items: items,
+    weight_g_m2: weight,
+    has_construction: Boolean(
+      (fields.fit_description && hasValue(fields.fit_description)) ||
+        (fields.weave_structure && hasValue(fields.weave_structure)) ||
+        (fields.elasticity && hasValue(fields.elasticity)) ||
+        (fields.size_chart && hasValue(fields.size_chart))
+    ),
+    care: fields.care_instructions && hasValue(fields.care_instructions) ? String(fields.care_instructions.normalized_value) : null,
+    category: fields.category && hasValue(fields.category) ? String(fields.category.normalized_value) : null
+  };
+}
+
+/* ───────────────── 规则匹配 ───────────────── */
+
+function matches(rule, ctx) {
+  if (rule.categories && rule.categories.length) {
+    if (!ctx.category) return { matched: false, reason: '品类未知' };
+    if (rule.categories.indexOf(ctx.category) < 0) return { matched: false, reason: '品类不符' };
+  }
+  const keys = Object.keys(ctx.features.byKey);
+  if (Array.isArray(rule.requires_features) && rule.requires_features.length) {
+    for (const f of rule.requires_features) {
+      if (keys.indexOf(f) < 0) return { matched: false, reason: `缺少特征 ${f}` };
+    }
+  }
+  if (Array.isArray(rule.any_features) && rule.any_features.length) {
+    const hit = rule.any_features.some((f) => keys.indexOf(f) >= 0);
+    if (!hit) return { matched: false, reason: '缺少任一相关特征' };
+  }
+  if (rule.text_regex) {
+    if (!rule.text_regex.test(ctx.rawText) && !rule.text_regex.test(ctx.fiberText || '')) {
+      return { matched: false, reason: '原文未命中' };
+    }
+  }
+  // 没有任何限定条件的规则不成立（避免"泛泛而谈"的条目）
+  const hasCondition = (rule.requires_features && rule.requires_features.length) ||
+    (rule.any_features && rule.any_features.length) ||
+    rule.text_regex;
+  if (!hasCondition) return { matched: false, reason: '规则无匹配条件' };
+  return { matched: true, reason: '命中' };
+}
+
+function likelihoodOf(rule, facts, features) {
+  if (rule.evidence_level === 'observed_defect') return 'high';
+  if (rule.likelihood_when_known === 'unknown') return 'unknown';
+  // 需要"材料已知 + 结构已知"才给可能性；否则按规范留 unknown（证据不足 ≠ 低风险）
+  const structuralKnown = Boolean(
+    features.byKey.knit_structure || features.byKey.woven_structure || features.byKey.coating_faux_leather || facts.has_construction
+  );
+  if (facts.has_fiber && structuralKnown) return rule.likelihood_when_known || 'medium';
+  if (facts.has_fiber || structuralKnown) return 'unknown';
+  return 'unknown';
+}
+
+function overallOf(likelihood, impact) {
+  if (likelihood === 'unknown' || impact === 'unknown') return 'insufficient';
+  const row = IMPACT_MATRIX[likelihood];
+  return (row && row[impact]) || 'insufficient';
+}
+
+function confidenceOf(rule, facts, features, likelihood) {
+  if (rule.evidence_level === 'observed_defect') return 'high';
+  const featureKnown = Object.keys(features.byKey).length > 0;
+  if (facts.has_fiber && facts.has_construction && featureKnown) return 'medium';
+  if (facts.has_fiber || facts.has_construction || featureKnown) return 'low';
+  return 'unknown';
+}
+
+function buildItem(rule, ctx) {
+  const featureKeys = [].concat(rule.requires_features || [], rule.any_features || []);
+  const observed = featureKeys
+    .map((k) => ctx.features.byKey[k])
+    .filter(Boolean)
+    .map((f) => `${f.label}（原文/字段：${f.evidence}）`);
+
+  const likelihood = likelihoodOf(rule, ctx.facts, ctx.features);
+  const overall = overallOf(likelihood, rule.impact);
+  const confidence = confidenceOf(rule, ctx.facts, ctx.features, likelihood);
+
+  const evidence = [];
+  for (const f of featureKeys.map((k) => ctx.features.byKey[k]).filter(Boolean)) {
+    evidence.push({ type: 'feature', label: f.label, text: f.evidence, source: f.source });
+  }
+  if (ctx.facts.fiber_text) evidence.push({ type: 'field', label: '纤维成分', text: ctx.facts.fiber_text, source: '标注' });
+  if (ctx.facts.weight_g_m2) evidence.push({ type: 'field', label: '面料克重', text: `${ctx.facts.weight_g_m2} g/m²`, source: '标注' });
+  if (ctx.facts.care) evidence.push({ type: 'field', label: '洗护', text: ctx.facts.care, source: '标签' });
+
+  const missing = [];
+  for (const need of rule.evidence_needed || []) {
+    if (/成分|比例/.test(need) && ctx.facts.has_fiber) continue;
+    if (/洗护/.test(need) && ctx.facts.care) continue;
+    if (/克重/.test(need) && ctx.facts.weight_g_m2) continue;
+    missing.push(need);
+  }
+
+  return {
+    id: rule.id,
+    item_name: rule.name,
+    garment_area: rule.area,
+    observed_feature: observed.length ? observed.join('；') : '（仅依据通用规律，未在本次材料中观察到具体特征）',
+    identified_material: ctx.facts.fiber_text || '未提供纤维成分',
+    construction_feature: ctx.facts.has_construction ? '有部分结构/版型信息' : '未提供结构或工艺信息',
+    possible_failure: (rule.failure_modes || []).join('；'),
+    failure_modes: rule.failure_modes || [],
+    mechanism: rule.mechanism,
+    evidence,
+    missing_information: missing,
+    likelihood_level: likelihood,
+    likelihood_label: LEVEL_LABEL[likelihood] || likelihood,
+    impact_level: rule.impact,
+    impact_label: LEVEL_LABEL[rule.impact] || rule.impact,
+    overall_risk: overall,
+    overall_label: LEVEL_LABEL[overall] || overall,
+    confidence_level: confidence,
+    confidence_label: CONFIDENCE_LABEL[confidence] || confidence,
+    mitigation: rule.mitigation || [],
+    seller_questions: rule.seller_questions || [],
+    verification_method: rule.verification,
+    source_references: rule.sources || [],
+    evidence_level: rule.evidence_level,
+    not_applicable: rule.not_applicable,
+    limitations: rule.limitations || null,
+    disclaimer:
+      '本条是基于图片文字与通用工艺知识的风险提示，不是检测结论；' +
+      (rule.limitations || '') +
+      ' 「判断置信度」不等于「发生概率」。',
+    category: rule.categories && rule.categories.length ? rule.categories : null,
+    updated_at: rule.updated_at || UPDATED_AT
+  };
+}
+
+/**
+ * 一条规则都没命中时，也要诚实地产出一条"证据不足"，而不是让整个区块消失。
+ * 这类条目在所有字段上都必须表明"无法判断"。
+ */
+function noEvidenceItem(facts, features) {
+  const missing = [];
+  if (!facts.category) missing.push('品类');
+  if (!facts.has_fiber) missing.push('纤维成分');
+  if (!facts.has_construction) missing.push('结构/工艺（接缝、领口、印花等）');
+  if (!facts.weight_g_m2) missing.push('克重');
+  if (!facts.care) missing.push('洗护标签');
+  if (!missing.length) missing.push('可判断的设计特征（如领口结构、印花工艺）');
+
+  return {
+    id: 'insufficient-evidence',
+    item_name: '现有材料不足以判断长期表现',
+    garment_area: '整体（尚未锁定具体部位）',
+    observed_feature: Object.keys(features.byKey).length
+      ? Object.keys(features.byKey).map((k) => features.byKey[k].label).join('、')
+      : '未识别到可用的设计特征',
+    identified_material: facts.fiber_text || '未提供纤维成分',
+    construction_feature: facts.has_construction ? '有部分结构/版型信息' : '未提供结构或工艺信息',
+    possible_failure: '无法判断具体失效方式',
+    failure_modes: [],
+    mechanism: '老化表现取决于纤维、纱线、织物组织、缝制工艺、洗护方式与穿着强度；' + `本次材料缺少 ${missing.join('、')}，因此无法把风险落到具体部位。`,
+    evidence: [],
+    missing_information: missing,
+    likelihood_level: 'unknown',
+    likelihood_label: LEVEL_LABEL.unknown,
+    impact_level: 'unknown',
+    impact_label: LEVEL_LABEL.unknown,
+    overall_risk: 'insufficient',
+    overall_label: LEVEL_LABEL.insufficient,
+    confidence_level: 'unknown',
+    confidence_label: CONFIDENCE_LABEL.unknown,
+    mitigation: ['补充吊牌/水洗标照片（成分、执行标准、洗护）', '补一张领口、袖口或接缝的近景', '向商家索取面料参数与检测资料'],
+    seller_questions: ['这款的成分、克重与洗护要求是什么？', '有耐磨/抗起球/色牢度等测试结果吗？'],
+    verification_method: '看吊牌与水洗标；要求商家提供检测报告首页',
+    source_references: ['通用纺织与服装工艺知识（非标准条文、非检测数据）'],
+    evidence_level: 'general_knowledge',
+    not_applicable: null,
+    limitations: '信息不足时不代表商品较差，也不代表没有风险：本条只表示"判断不了"。',
+    disclaimer:
+      '这是一条"证据不足"的提示，不是风险评估结果。「证据不足」不等于低风险，也不等于高风险。' +
+      '补充材料后才能给出更具体的判断。',
+    category: null,
+    updated_at: UPDATED_AT
+  };
+}
+
+/* ───────────────── 区域分布 ───────────────── */
+
+function outlineOf(category) {
+  if (!category) return 'generic';
+  if (/裤|牛仔|短裤/.test(category)) return 'bottom';
+  if (/裙|连衣裙/.test(category)) return 'dress';
+  if (/外套|大衣|西装|风衣|夹克|羽绒/.test(category)) return 'outer';
+  if (/T恤|卫衣|衬衫|羊毛衫|内衣|瑜伽|运动/.test(category)) return 'top';
+  return 'generic';
+}
+
+function buildRegions(category, items) {
+  const known = CATEGORY_REGIONS[category] || ['领口', '袖口', '下摆', '接缝', '图案与装饰'];
+  const used = [];
+  const regions = known.map((name) => {
+    const hits = items.filter((it) => {
+      const matched = it.garment_area.indexOf(name) >= 0 || (name === '接缝' && /接缝|拼接|缝合/.test(it.garment_area));
+      if (matched) used.push(it.id);
+      return matched;
+    });
+    return regionOf(name, hits);
+  });
+
+  // 没有落进任何已知区域的条目（例如"腋下 / 袖内侧"），单独列出，避免信息被吞掉
+  const extras = new Map();
+  for (const it of items) {
+    if (used.indexOf(it.id) >= 0) continue;
+    const area = it.garment_area.split(' / ')[0];
+    if (!extras.has(area)) extras.set(area, []);
+    extras.get(area).push(it);
+  }
+  for (const [area, hits] of extras) regions.push(regionOf(area, hits));
+
+  return {
+    outline: outlineOf(category),
+    regions,
+    note:
+      '标记只表示"该位置有风险条目或值得重点观察"，不代表已检查、也不代表没有标记的区域就没有风险。' +
+      '本次图片是否覆盖这些位置、内部结构与接缝细节，系统无法确认。'
+  };
+}
+
+function regionOf(name, hits) {
+  const worst = hits
+    .map((h) => h.overall_risk)
+    .sort((a, b) => (SEVERITY_ORDER[a] === undefined ? 9 : SEVERITY_ORDER[a]) - (SEVERITY_ORDER[b] === undefined ? 9 : SEVERITY_ORDER[b]))[0];
+  return {
+    name,
+    level: worst || 'none',
+    level_label: worst ? LEVEL_LABEL[worst] || worst : '未发现相关条目',
+    item_ids: hits.map((h) => h.id),
+    inspected: false
+  };
+}
+
+/* ───────────────── 时间轴（定性，不给寿命） ───────────────── */
+
+function buildTimeline(ctx, items) {
+  const areas = Array.from(new Set(items.slice(0, 4).map((i) => i.garment_area))).slice(0, 4);
+  const care = ctx.facts.care;
+  const print = ctx.features.byKey.big_print || ctx.features.byKey.embroidery_beads;
+  return [
+    {
+      stage: '初始状态',
+      title: '现在能看到的',
+      text:
+        `已知结构：${Object.keys(ctx.features.byKey).length ? Object.keys(ctx.features.byKey).map((k) => ctx.features.byKey[k].label).join('、') : '未识别到明确的设计特征'}。` +
+        (ctx.facts.fiber_text ? `成分标注为 ${ctx.facts.fiber_text}（商家标注）。` : '成分未提供。')
+    },
+    {
+      stage: '使用与摩擦',
+      title: '最先受力的位置',
+      text: areas.length
+        ? `${areas.join('、')}是这类商品最先出现变化的部位：反复摩擦、拉伸或弯折会让纤维与缝线逐步疲劳。`
+        : '暂未识别出明确的受力集中位置。'
+    },
+    {
+      stage: '洗护',
+      title: '洗护决定老化速度',
+      text: care
+        ? `标签要求：${care}。按标签洗护可以明显降低变形、起球与开裂的速度；违反标签要求通常是老化的加速器。`
+        : '没有洗护标签信息；按更保守的方式（低温、温和、翻面、阴干）通常更安全。' + (print ? '带印花或装饰件的商品尤其要翻面洗涤。' : '')
+    },
+    {
+      stage: '长期外观',
+      title: '可能被察觉的变化',
+      text: items.length
+        ? `值得定期观察：${items.slice(0, 3).map((i) => i.garment_area).join('、')}的颜色是否均匀、是否起球或变形。`
+        : '暂无可列的观察点。'
+    },
+    {
+      stage: '实际反馈',
+      title: '穿过之后才知道的部分',
+      text: '洗涤与穿着次数、使用强度、环境湿度都会影响实际表现。建议记录第一次洗后的尺寸与外观，作为后续判断基线。'
+    }
+  ];
+}
+
+/* ───────────────── 长期外观与使用价值（与物理耐久分开） ───────────────── */
+
+function buildAppearance(ctx, items) {
+  const durability = items
+    .filter((i) => i.overall_risk === 'high' || i.overall_risk === 'medium')
+    .slice(0, 4)
+    .map((i) => ({ area: i.garment_area, text: i.possible_failure, level: i.overall_risk }));
+  const durabilityInsufficient = items.filter((i) => i.overall_risk === 'insufficient').length;
+
+  const style = [];
+  const f = ctx.features.byKey;
+  if (f.big_print) {
+    style.push({
+      title: '图案辨识度较高',
+      text: '大面积图案的视觉重心集中，搭配时可考虑用素色下装或外套平衡；与其它图案叠穿时更依赖比例控制。若你更看重多年自由搭配，可与素色/小图案款对比。',
+      level: 'info'
+    });
+  }
+  if (f.embroidery_beads) {
+    style.push({
+      title: '装饰元素较多',
+      text: '装饰件会缩小适用场景（更适合特定场合），同时增加洗护时勾挂的可能。若以日常高频穿着为主，可优先考虑装饰更克制的款式。',
+      level: 'info'
+    });
+  }
+  if (f.splice_multi) {
+    style.push({
+      title: '拼接/拼色设计',
+      text: '拼色与拼接能提升辨识度，但也意味着不同区域的老化节奏可能不一致（颜色、收缩、起球会分开发生），长期外观可能出现"局部与整体不同步"。',
+      level: 'info'
+    });
+  }
+  if (!style.length) {
+    style.push({
+      title: '设计相对克制',
+      text: '本次材料中没有识别到大面积图案、密集装饰或拼接设计，搭配灵活度通常较高；这不是质量结论，只是外观风格的中性描述。',
+      level: 'info'
+    });
+  }
+
+  return {
+    durability,
+    durability_note: durabilityInsufficient
+      ? `另有 ${durabilityInsufficient} 项因缺少材料/结构/检测信息无法判断，与"低风险"不是一回事。`
+      : '物理耐久性相关条目见上方风险列表。',
+    style,
+    disclaimer:
+      '本节只做"是否容易显旧/是否容易搭配"的中性描述，不评价审美高低，也不把设计感等同于不耐穿。' +
+      '流行元素、个人风格与穿着场景差异很大，最终取舍由你决定。'
+  };
+}
+
+/* ───────────────── 补图建议 ───────────────── */
+
+function buildEvidenceGaps(ctx, items) {
+  const gaps = new Map();
+  for (const it of items) {
+    for (const need of it.missing_information || []) {
+      if (!gaps.has(need)) gaps.set(need, { what: need, why: [], items: [] });
+      const g = gaps.get(need);
+      if (g.items.indexOf(it.item_name) < 0) g.items.push(it.item_name);
+      const why = `用于判断「${it.garment_area}」的风险：${it.possible_failure.split('；')[0]}`;
+      if (g.why.indexOf(why) < 0) g.why.push(why);
+    }
+  }
+  return Array.from(gaps.values()).slice(0, 6).map((g) => ({
+    what: g.what,
+    why: g.why.slice(0, 2).join('；'),
+    how: /近景|图片/.test(g.what) ? '拍一张能看清结构与纹理的局部照片（可以只拍这一处）' : '向商家索取参数或检测资料，或在吊牌/水洗标上核对'
+  }));
+}
+
+/* ───────────────── 一句话总结 ───────────────── */
+
+function buildSummary(ctx, items, gaps) {
+  if (!items.length) {
+    return '本次材料没有识别到可判断的设计或工艺特征，因此无法给出老化风险提示。' +
+      '这不等于"没有问题"，只说明现有信息不足以支撑任何判断。';
+  }
+  const high = items.filter((i) => i.overall_risk === 'high');
+  const medium = items.filter((i) => i.overall_risk === 'medium');
+  const insufficient = items.filter((i) => i.overall_risk === 'insufficient');
+
+  const areas = Array.from(new Set(items.map((i) => i.garment_area))).slice(0, 3).join('、');
+  const parts = [];
+  if (high.length) {
+    parts.push(`最值得关注的是${Array.from(new Set(high.map((i) => i.garment_area))).slice(0, 2).join('、')}`);
+  } else if (medium.length) {
+    parts.push(`目前值得关注的是${areas}`);
+  } else {
+    parts.push(`目前能在${areas}看到一些需要留意的设计特征`);
+  }
+
+  if (insufficient.length) {
+    parts.push(`其中 ${insufficient.length} 项因缺少材料或工艺信息暂时无法判断（不是"没问题"）`);
+  }
+
+  if (gaps.length) {
+    parts.push(`补充${gaps.slice(0, 2).map((g) => g.what).join('、')}可以明显提高判断的可靠度`);
+  }
+
+  parts.push('如果商家无法提供这些资料，就把它们当作"尚未验证的风险"，而不是确定的质量问题。');
+  return parts.join('，').replace(/，+/g, '，').replace(/。+$/, '') + '。';
+}
+
+/* ───────────────── 入口 ───────────────── */
+
+/**
+ * @param {{fields: object, rawText?: string, profile?: object}} input
+ */
+function buildWearReport(input) {
+  const fields = (input && input.fields) || {};
+  const rawText = String((input && input.rawText) || '');
+  const facts = materialFacts(fields);
+  const features = detectFeatures({ fields, rawText });
+
+  const ctx = {
+    fields,
+    rawText,
+    facts,
+    category: facts.category,
+    features,
+    fiberText: facts.fiber_text
+  };
+
+  const items = [];
+  const skipped = [];
+  for (const rule of RULES) {
+    const m = matches(rule, ctx);
+    if (!m.matched) {
+      if (m.reason !== '品类不符' && m.reason !== '品类未知') skipped.push({ id: rule.id, reason: m.reason });
+      continue;
+    }
+    items.push(buildItem(rule, ctx));
+  }
+
+  // 一条都没命中：给一条明确的"证据不足"，而不是让区块空着
+  if (!items.length) {
+    items.push(noEvidenceItem(facts, features));
+  }
+
+  // 排序：高风险 → 中 → 证据不足 → 低；同级按影响程度
+  const impactRank = { high: 0, medium: 1, low: 2, unknown: 3 };
+  items.sort((a, b) => {
+    const ra = SEVERITY_ORDER[a.overall_risk] === undefined ? 9 : SEVERITY_ORDER[a.overall_risk];
+    const rb = SEVERITY_ORDER[b.overall_risk] === undefined ? 9 : SEVERITY_ORDER[b.overall_risk];
+    return ra - rb || (impactRank[a.impact_level] || 3) - (impactRank[b.impact_level] || 3);
+  });
+
+  const gaps = buildEvidenceGaps(ctx, items);
+  const counts = {
+    high: items.filter((i) => i.overall_risk === 'high').length,
+    medium: items.filter((i) => i.overall_risk === 'medium').length,
+    low: items.filter((i) => i.overall_risk === 'low').length,
+    insufficient: items.filter((i) => i.overall_risk === 'insufficient').length
+  };
+
+  return {
+    available: items.length > 0,
+    title: '穿久了会怎么样？',
+    subtitle: '基于已知材料、结构与工艺的风险提示；不是检测报告，也不预测具体寿命',
+    features: features.features,
+    facts: {
+      category: facts.category,
+      fiber: facts.fiber_text,
+      weight_g_m2: facts.weight_g_m2,
+      care: facts.care,
+      has_construction: facts.has_construction
+    },
+    items,
+    counts,
+    summary: buildSummary(ctx, items, gaps),
+    timeline: buildTimeline(ctx, items),
+    appearance: buildAppearance(ctx, items),
+    regions: buildRegions(facts.category, items),
+    evidence_gaps: gaps,
+    seller_questions: Array.from(new Set(items.flatMap((i) => i.seller_questions || []))).slice(0, 8),
+    skipped_rules: skipped.slice(0, 12),
+    disclaimer:
+      '本区块只做风险提示：不预测具体使用年限、洗涤次数或坏损概率，也不把材料常见特征当成每件商品都会出现的结果。' +
+      '要得到确定结论，需要检测报告、实物核对与你的实际穿着记录。',
+    confidence_note: '「判断置信度」表示我们对这条判断有多少依据，不等于发生概率。',
+    rule_count: RULES.length,
+    updated_at: UPDATED_AT
+  };
+}
+
+module.exports = { buildWearReport, IMPACT_MATRIX, LEVEL_LABEL, CONFIDENCE_LABEL, outlineOf };
+
+  };
+  defs["core/wear/features.js"] = function (module, exports, require) {
+/**
+ * wear/features.js —— 从"已识别的字段 + OCR 原文"里提出**设计特征**。
+ *
+ * 为什么单独一层：
+ *   老化风险规则不应该直接读原始文本（那样每条规则都要写一遍正则），
+ *   也不应该直接读字段（字段里没有"罗纹领口"这种设计信息）。
+ *   所以先把文本/字段提炼成一组带证据来源的特征，规则只对特征做匹配。
+ *
+ * 三原则：
+ *   1. 特征只记录"文中/图里出现了什么"，不记录"所以质量如何"；
+ *   2. 每条特征都带 evidence（原句）与 source（promo_screenshot / physical_label / user_input）；
+ *   3. 没识别到的特征一律不假设存在（不推断"应该有罗纹领口"）。
+ */
+
+'use strict';
+
+const { hasValue } = require('../fields');
+
+/** 特征定义：key / 中文名 / 匹配文本 / 说明 */
+const FEATURE_DEFS = [
+  {
+    key: 'rib_collar',
+    label: '罗纹领口',
+    re: /(罗纹.{0,4}领|领口.{0,4}罗纹|罗纹领口|rib\s*collar)/i,
+    note: '领口采用罗纹针织（线圈纵行相间），横向弹性好但长期拉伸会疲劳'
+  },
+  {
+    key: 'rib_cuff_hem',
+    label: '罗纹袖口/下摆',
+    re: /(罗纹.{0,4}(袖口|下摆|裤脚)|(袖口|下摆|裤脚).{0,4}罗纹|收口|束口)/,
+    note: '边缘用罗纹或弹性收口，反复拉伸后可能出现松弛'
+  },
+  {
+    key: 'big_print',
+    label: '大面积印花/胶印',
+    re: /(大面积.{0,4}(印花|图案|胶印)|胶印|丝印|厚板|发泡印|烫画|热转印|满印)/,
+    note: '塑胶类印花覆盖在面料表面，弯折与洗涤后可能开裂或翘边'
+  },
+  {
+    key: 'print_any',
+    label: '有印花/图案',
+    re: /(印花|印图|图案|logo|LOGO|Logo|刺绣图案)/,
+    note: '存在表面图案工艺，耐久性取决于工艺与洗护'
+  },
+  {
+    key: 'coating_faux_leather',
+    label: '涂层/仿皮结构',
+    re: /(仿皮|PU皮|PU|聚氨酯涂层|涂层|覆膜|贴膜|防水涂层|皮革)/,
+    note: '表面有高分子涂层或膜层，弯折处与接缝边缘是常见失效起点'
+  },
+  {
+    key: 'brushed_surface',
+    label: '磨毛/绒面',
+    re: /(磨毛|拉绒|绒面|仿麂皮|麂皮绒|摇粒绒|抓绒|珊瑚绒|法兰绒)/,
+    note: '表面纤维被拉起形成绒感，摩擦后可能起球、压亮或局部倒绒'
+  },
+  {
+    key: 'fleece_lining',
+    label: '起绒内里',
+    re: /(内里.{0,4}(抓绒|起绒|加绒)|加绒|抓绒内里|摇粒绒内里)/,
+    note: '内里起绒保暖，但容易掉毛、吸灰、与粗糙衣物摩擦起球'
+  },
+  {
+    key: 'embroidery_beads',
+    label: '刺绣/珠片/装饰件',
+    re: /(刺绣|珠片|亮片|钉珠|水钻|铆钉|贴布|布贴|流苏|挂饰|五金装饰)/,
+    note: '装饰件与底布的连接处是受力集中点，洗护时还可能勾挂'
+  },
+  {
+    key: 'metal_hardware',
+    label: '金属五金（拉链/扣）',
+    re: /(金属拉链|金属扣|五金|拉链|YKK|铜扣|铆钉扣)/,
+    note: '金属件与面料摩擦、以及镀层磨损，是常见的外观老化点'
+  },
+  {
+    key: 'drawstring_hood',
+    label: '帽绳/连帽结构',
+    re: /(连帽|帽绳|抽绳|卫衣帽)/,
+    note: '帽绳孔、帽与衣身连接处是拉扯与磨损集中区'
+  },
+  {
+    key: 'splice_multi',
+    label: '拼接/拼色/异材质',
+    re: /(拼接|拼色|撞色|异材质|复合面料)/,
+    note: '不同材质/颜色的拼接处，收缩率与色牢度差异会放大老化差异'
+  },
+  {
+    key: 'elastic_waist',
+    label: '松紧腰/弹性腰头',
+    re: /(松紧腰|弹力腰|橡筋腰|抽绳腰)/,
+    note: '橡筋长期受热与拉伸会衰减，腰头可能出现松弛与卷边'
+  },
+  {
+    key: 'stretch_fabric',
+    label: '弹力/紧身结构',
+    re: /(弹力|高弹|紧身|瑜伽|速干|压缩|氨纶)/,
+    note: '高伸展区域的接缝与弹性纤维承受反复拉伸'
+  },
+  {
+    key: 'pleats_structure',
+    label: '褶裥/定型结构',
+    re: /(褶|压褶|定型|烫衬|粘合衬|硬挺)/,
+    note: '定型与粘合结构依赖工艺，洗护不当可能失去形状'
+  },
+  {
+    key: 'long_knit',
+    label: '长款针织/垂坠结构',
+    re: /(长款|中长|垂坠|针织衫|毛衣|毛衣裙)/,
+    note: '针织长款受重力影响更明显，悬挂储存会拉伸'
+  },
+  {
+    key: 'thin_fabric',
+    label: '偏薄面料',
+    re: /(轻薄|薄款|超薄|透气网眼|冰丝)/,
+    note: '薄面料单位面积纤维少，耐磨与抗勾丝余量较小'
+  },
+  {
+    key: 'performance_claim',
+    label: '性能宣称（抗起球/耐磨/防水等）',
+    re: /(抗起球|不易起球|耐磨|防泼水|防水|抗皱|免烫|抗静电|防紫外线|抗菌)/,
+    note: '性能宣称需要检测报告支撑，页面文案本身不是证据'
+  },
+  {
+    key: 'visible_defect',
+    label: '已存在的损伤迹象',
+    re: /(起球|勾丝|开裂|脱层|掉皮|开线|脱线|破损|破洞|掉色|发白|变形|磨损)/,
+    note: '这是**当前已经存在**的迹象，与"未来可能发生"必须分开表述'
+  }
+];
+
+/** 由字段直接得出的结构特征（不依赖文本） */
+function structureFromFields(fields) {
+  const out = [];
+  const knit = /针织|T恤|卫衣|毛衣|针织衫|打底/.test(String(fields.category && fields.category.normalized_value || ''));
+  const woven = /牛仔|衬衫|西服|西装|大衣|风衣|休闲裤|西裤/.test(String(fields.category && fields.category.normalized_value || ''));
+  if (knit) out.push({ key: 'knit_structure', label: '针织结构', note: '线圈串套，有弹性、易变形', evidence: '品类', source: 'field' });
+  if (woven) out.push({ key: 'woven_structure', label: '梭织结构', note: '经纬交织，尺寸稳定、弹性差', evidence: '品类', source: 'field' });
+
+  const fiber = fields.fiber_composition;
+  if (fiber && fiber.parsed && Array.isArray(fiber.parsed.items)) {
+    const spandex = fiber.parsed.items.filter((i) => /氨纶|弹性/.test(i.fiber)).reduce((s, i) => s + (i.percent || 0), 0);
+    if (spandex >= 5) {
+      out.push({ key: 'high_spandex', label: `高氨纶（${spandex}%）`, note: '弹性好，但耐热与长期回弹需要关注', evidence: fiber.normalized_value, source: 'field' });
+    } else if (spandex > 0) {
+      out.push({ key: 'spandex_low', label: `含氨纶（${spandex}%）`, note: '少量弹性纤维，改善活动度', evidence: fiber.normalized_value, source: 'field' });
+    }
+    const wool = fiber.parsed.items.filter((i) => /羊毛|羊绒/.test(i.fiber)).reduce((s, i) => s + (i.percent || 0), 0);
+    if (wool >= 30) out.push({ key: 'wool_rich', label: `羊毛/羊绒 ${wool}%`, note: '动物纤维，缩绒与起球风险与工艺相关', evidence: fiber.normalized_value, source: 'field' });
+    const cotton = fiber.parsed.items.filter((i) => i.fiber === '棉').reduce((s, i) => s + (i.percent || 0), 0);
+    if (cotton >= 50) out.push({ key: 'cotton_rich', label: `棉 ${cotton}%`, note: '吸湿亲肤，但易皱、缩水与显旧取决于整理工艺', evidence: fiber.normalized_value, source: 'field' });
+    const cellulosic = fiber.parsed.items.filter((i) => /粘胶|莫代尔|莱赛尔/.test(i.fiber)).reduce((s, i) => s + (i.percent || 0), 0);
+    if (cellulosic >= 30) out.push({ key: 'regenerated_cellulose', label: `再生纤维素 ${cellulosic}%`, note: '湿态强度低，易缩水与变形', evidence: fiber.normalized_value, source: 'field' });
+  }
+
+  const weight = fields.fabric_weight;
+  if (hasValue(weight) && weight.unit === 'g/m²' && typeof weight.normalized_value === 'number') {
+    if (weight.normalized_value >= 300) out.push({ key: 'heavy_fabric', label: `克重较高（${weight.normalized_value} g/m²）`, note: '厚实，但弯折处更易形成硬折痕', evidence: weight.raw_text, source: 'field' });
+    if (weight.normalized_value <= 150) out.push({ key: 'light_fabric', label: `克重较低（${weight.normalized_value} g/m²）`, note: '偏薄，耐磨余量较小', evidence: weight.raw_text, source: 'field' });
+  }
+
+  if (hasValue(fields.care_instructions)) {
+    const care = String(fields.care_instructions.normalized_value || '');
+    if (/干洗/.test(care)) out.push({ key: 'dry_clean_only', label: '需干洗', note: '干洗依赖度高的商品，日常维护成本更高', evidence: care, source: 'field' });
+    if (/不可漂白|勿漂白/.test(care)) out.push({ key: 'no_bleach', label: '不可漂白', note: '漂白限制通常与染料/纤维稳定性相关', evidence: care, source: 'field' });
+  }
+
+  return out;
+}
+
+/**
+ * 识别特征。
+ * @param {{fields: object, rawText?: string}} input
+ * @returns {{features: Array<object>, byKey: Object<string, object>, text_hits: Array<object>}}
+ */
+function detectFeatures(input) {
+  const fields = (input && input.fields) || {};
+  const rawText = String((input && input.rawText) || '');
+  const features = [];
+  const byKey = {};
+
+  for (const def of FEATURE_DEFS) {
+    const m = rawText.match(def.re);
+    if (!m) continue;
+    const feat = {
+      key: def.key,
+      label: def.label,
+      note: def.note,
+      evidence: String(m[0]),
+      source: 'text',
+      from_observed_text: true
+    };
+    features.push(feat);
+    byKey[def.key] = feat;
+  }
+
+  for (const feat of structureFromFields(fields)) {
+    if (byKey[feat.key]) continue;
+    features.push(feat);
+    byKey[feat.key] = feat;
+  }
+
+  return { features, byKey, text_hits: features.filter((f) => f.source === 'text') };
+}
+
+module.exports = { detectFeatures, FEATURE_DEFS, structureFromFields };
+
+  };
+  defs["core/wear/rules.js"] = function (module, exports, require) {
+/**
+ * wear/rules.js —— 服装设计与老化风险知识库（数据，不是代码逻辑）。
+ *
+ * 每条规则的结构（与规范 §3 一致）：
+ *   id / name              规则标识与名称
+ *   categories             适用品类（空数组 = 不限）
+ *   requires_features      必须全部命中的设计特征（features.js 的 key）
+ *   any_features           命中其一即可
+ *   text_regex             额外的原文匹配（用于颜色、纽扣等无对应特征的场景）
+ *   area                   衣服的具体位置
+ *   failure_modes          潜在失效方式（数组，具体到可观察）
+ *   mechanism              形成机制（为什么）
+ *   impact                 low | medium | high（影响程度，与发生可能性分开）
+ *   likelihood_when_known  材料与结构已知时的可能性基准
+ *   evidence_needed        需要什么证据才能更进一步
+ *   mitigation             可以降低风险的洗护/使用方式
+ *   seller_questions       购买前可以问商家的问题
+ *   verification           自己如何核实
+ *   not_applicable         什么情况下这条不适用
+ *   evidence_level         general_knowledge | industry_practice | observed_defect
+ *   sources                信息来源（本项目没有检测数据，一律标明是通用知识/行业惯例）
+ *   limitations            这条规则本身的局限
+ *   updated_at             更新时间
+ *
+ * 新增规则只需往这个数组里加数据；analyze.js 不需要改。
+ */
+
+'use strict';
+
+const UPDATED_AT = '2026-10-23';
+const SRC = '通用纺织与服装工艺知识（非标准条文、非检测数据）';
+
+const RULES = [
+  /* ───────── 一、领口、袖口与弹性部位 ───────── */
+  {
+    id: 'rib-collar-relax',
+    name: '罗纹领口反复拉伸后松弛',
+    categories: ['T恤', '卫衣', '羊毛衫', '内衣'],
+    requires_features: ['rib_collar'],
+    area: '领口',
+    failure_modes: ['领口扩张、不能回弹', '领口边缘波浪化', '领口与衣身接缝扭曲'],
+    mechanism: '罗纹靠线圈纵行相间提供横向弹性；纱线捻度、氨纶比例、针距与缝合工艺决定回弹保持能力，反复穿脱与热水洗涤会加速弹性疲劳。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['领口近景（能看到罗纹与接缝）', '成分中氨纶比例', '洗护标签'],
+    mitigation: ['低温、温和程序洗涤，避免热水与烘干', '不要挂着领口晾晒，平摊或对折悬挂', '穿脱时避免抓住领口拉扯'],
+    seller_questions: ['领口是否做过拉伸回复或洗后尺寸稳定性测试？有可查看的结果吗？', '领口罗纹的氨纶比例是多少？'],
+    verification: '拉伸领口后松手，观察 10 秒内回复程度；与同价位商品对比。',
+    not_applicable: '高领/翻领等非罗纹结构不适用本条。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '照片无法判断罗纹的纱线与弹性纤维比例，也无法测出实际回弹；本条只说明机制与观察点。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'collar-seam-strain',
+    name: '领口拼缝与异材质连接的受力风险',
+    categories: ['T恤', '卫衣', '羊毛衫'],
+    requires_features: ['rib_collar'],
+    any_features: ['splice_multi'],
+    area: '领口接缝',
+    failure_modes: ['缝线断裂、出现小裂口', '接缝处起皱或扭曲', '深浅拼接处先显旧'],
+    mechanism: '罗纹与衣身的弹性差异会在接缝处形成集中应力；包边/压条工艺与缝线张力决定它能承受多少次拉伸。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['领口内侧接缝近景', '是否有包边/压条'],
+    mitigation: ['洗涤时翻面、装洗衣袋', '避免与其他带钩挂件同洗'],
+    seller_questions: ['领口接缝是包边还是直接锁边？可以做拉扯检查吗？'],
+    verification: '轻拉领口接缝，看针脚是否均匀、有无跳针。',
+    not_applicable: '一体成型（无缝）领口不适用。',
+    evidence_level: 'industry_practice',
+    sources: [SRC],
+    limitations: '缝线强度无法从照片判断。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'cuff-hem-relax',
+    name: '罗纹袖口/下摆松弛',
+    categories: ['卫衣', 'T恤', '运动裤', '夹克'],
+    requires_features: ['rib_cuff_hem'],
+    area: '袖口 / 下摆',
+    failure_modes: ['袖口变松、失去收口感', '下摆波浪化、不平整', '边缘磨损起毛'],
+    mechanism: '收口部位长期承受拉伸与摩擦，弹性纤维疲劳后回复力下降；边缘还直接接触桌面与包带。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['袖口/下摆近景', '是否含氨纶及比例'],
+    mitigation: ['避免长时间挂着袖口受力', '洗涤后整理平整再晾干'],
+    seller_questions: ['袖口和下摆的罗纹是否含氨纶？比例多少？'],
+    verification: '拉伸后观察回复；看边缘是否有起毛。',
+    not_applicable: '无收口设计的直筒袖口/下摆不适用。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '仅凭外观不能判断具体回弹寿命。',
+    updated_at: UPDATED_AT
+  },
+
+  /* ───────── 二、起球、磨损、褪色、缩水、变形 ───────── */
+  {
+    id: 'knit-pilling',
+    name: '针织物起球',
+    categories: ['T恤', '卫衣', '羊毛衫', '运动裤'],
+    requires_features: ['knit_structure'],
+    area: '腋下 / 袖子内侧 / 衣身侧面 / 腰部',
+    failure_modes: ['局部起球（腋下、袖内侧最先）', '绒面不均匀、视觉发毛'],
+    mechanism: '短纤维或低捻纱在摩擦中迁移到表面并纠缠成球；针织结构蓬松、摩擦面积大，比紧密梭织更容易起球。',
+    impact: 'low',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['面料近景（能看清表面平整度）', '是否标注抗起球等级或检测报告'],
+    mitigation: ['翻面洗涤、减少与粗糙面料摩擦', '不要用刷子或强力搓洗', '起球后用毛球修剪器处理，不要硬扯'],
+    seller_questions: ['有抗起球测试结果吗（如 GB/T 4802 系列的测试等级）？'],
+    verification: '用指腹在袖内侧来回摩擦数十次，观察是否起毛。',
+    not_applicable: '紧密光滑的梭织面料（如府绸、牛仔）不适用。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '起球程度取决于纱线结构与整理工艺，成分单一（如纯棉）并不保证不起球，反之亦然。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'wool-acrylic-pilling',
+    name: '羊毛/腈纶混纺的起球与毡化',
+    categories: ['羊毛衫', '大衣', '围巾/披肩'],
+    requires_features: ['wool_rich'],
+    area: '腋下 / 袖内侧 / 腰部',
+    failure_modes: ['起球', '洗后毡化、尺寸缩小', '表面失去原有纹理'],
+    mechanism: '动物纤维表面有鳞片，湿热与机械作用会互相纠缠（毡化）；纤维越细越软，耐磨与抗起球表现越依赖纺纱结构。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['成分比例', '是否防缩处理', '洗护标签'],
+    mitigation: ['冷水手洗或羊毛程序，不要搓揉', '平摊晾干，不要悬挂', '避免烘干'],
+    seller_questions: ['是否做过防缩处理？可以冷水手洗吗？'],
+    verification: '查看洗护标签是否明确"不可机洗"；询问成分中的羊毛细度。',
+    not_applicable: '含毛量很低（<10%）的混纺不适用本条。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '无法从照片判断纤维细度与防缩工艺。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'brushed-surface-change',
+    name: '磨毛/绒面的绒感变化与压亮',
+    categories: [],
+    requires_features: ['brushed_surface'],
+    area: '衣身正面 / 袖内侧 / 臀部（坐压处）',
+    failure_modes: ['局部压亮、倒绒', '绒面不均匀', '纤维脱落、掉毛'],
+    mechanism: '起绒面料的表面纤维方向与密度决定观感；长期受压与摩擦会让绒毛倒伏，形成"压亮"的区域。',
+    impact: 'low',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['面料近景', '是否有绒面梳理说明'],
+    mitigation: ['避免长时间局部受压', '低温轻柔洗涤，不要拧绞', '顺着绒毛方向熨烫（低温）'],
+    seller_questions: ['面料是否有抗起球或绒面稳定性说明？'],
+    verification: '用手掌在面料上单向抚过，观察是否出现明显色差带。',
+    not_applicable: '光滑面、涂层光面不适用。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '绒面变化属于正常现象与实质损伤之间的灰色地带，本工具不据此判定质量。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'dark-color-fade',
+    name: '深色/高饱和色的褪色与磨白',
+    categories: ['牛仔裤', '休闲裤', 'T恤', '卫衣', '外套'],
+    any_features: ['knit_structure', 'woven_structure'],
+    text_regex: /(黑色|深灰|藏青|深蓝|酒红|墨绿|深咖|黑)/,
+    area: '领口 / 腋下 / 裤脚 / 膝盖 / 臀部 / 背包肩带接触处',
+    failure_modes: ['高摩擦处先泛白', '洗后整体色光变化', '拼接处出现明显色差'],
+    mechanism: '染料上染深度与色牢度决定抗磨白能力；深色面料一旦局部磨损，反差比浅色更明显。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['色牢度检测结果（耐摩擦、耐洗）', '是否做过固色处理'],
+    mitigation: ['翻面洗涤、冷水、短周期', '深浅分开洗', '减少与背包带、粗糙表面的摩擦'],
+    seller_questions: ['有耐摩擦色牢度与耐洗色牢度的检测结果吗？'],
+    verification: '用白色湿布在面料上摩擦数次，看是否明显沾色。',
+    not_applicable: '浅色/白色商品不适用本条；牛仔的预设水洗做旧效果不属于缺陷。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '没有检测数据时只能说"值得关注"，不能断言一定褪色。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'cellulosic-shrinkage',
+    name: '棉/再生纤维素的缩水与尺寸变化',
+    categories: ['T恤', '衬衫', '连衣裙', '卫衣'],
+    requires_features: ['knit_structure'],
+    any_features: ['regenerated_cellulose', 'cotton_rich'],
+    area: '衣长 / 袖长 / 整体廓形',
+    failure_modes: ['衣长、袖长缩短', '衣身变窄', '下摆变形'],
+    mechanism: '纤维素纤维在湿热与机械作用下会释放纺纱/织造时积累的内应力，产生收缩；是否预缩整理决定程度。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['是否标注预缩/水洗尺寸变化率', '洗护标签温度要求'],
+    mitigation: ['按标签温度洗涤，避免高温烘干', '洗后立即整理形状再晾干'],
+    seller_questions: ['面料是否做过预缩？水洗尺寸变化率是多少？'],
+    verification: '查看详情页是否有"洗后尺寸变化率"说明或检测结果。',
+    not_applicable: '标注"预缩处理"且有检测数据的商品，风险明显降低（但仍需按标签洗护）。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '不能从成分标签预测具体缩水百分比；任何量化结论都需要检测数据。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'bias-distortion',
+    name: '针织衣物的扭曲与版型走样',
+    categories: ['T恤', '连衣裙', '卫衣'],
+    requires_features: ['knit_structure'],
+    any_features: ['splice_multi', 'long_knit'],
+    area: '衣身侧缝 / 下摆 / 拼接处',
+    failure_modes: ['侧缝扭转前移', '下摆不平', '拼接区域收缩不一致'],
+    mechanism: '针织线圈在洗涤与悬挂中会沿受力方向发生位移；不同组织的拼接区域收缩率不同，差异会被放大。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['侧缝近景', '洗护标签', '是否标注尺寸稳定性'],
+    mitigation: ['平摊晾干，不要湿挂', '不要用力拧绞'],
+    seller_questions: ['是否做过洗后扭曲/尺寸稳定性测试？'],
+    verification: '把衣服平铺，看侧缝是否明显斜向偏移。',
+    not_applicable: '梭织衬衫类不适用（梭织更稳定）。',
+    evidence_level: 'industry_practice',
+    sources: [SRC],
+    limitations: '轻微斜向在针织中属常见现象，本工具不据此判定为质量问题。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'long-knit-sag',
+    name: '长款针织的垂坠拉伸',
+    categories: ['羊毛衫', '连衣裙', '针织衫'],
+    requires_features: ['long_knit'],
+    area: '肩部 / 衣长 / 下摆',
+    failure_modes: ['衣长被拉长', '肩线变形', '下摆松垮'],
+    mechanism: '针织结构在自重下会缓慢变形，长款与宽松肩型受力更大；悬挂储存会加速这一过程。',
+    impact: 'low',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['克重与组织密度', '肩部结构'],
+    mitigation: ['折叠收纳而不是长时间悬挂', '洗涤后平摊定型'],
+    seller_questions: ['克重与针距是多少？是否有洗后尺寸稳定性说明？'],
+    verification: '新衣量一次衣长，洗后复量对比。',
+    not_applicable: '短款、紧身针织不适用。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '设计本身的宽松垂坠风格 ≠ 使用后失去形状，本工具区分这两者。',
+    updated_at: UPDATED_AT
+  },
+
+  /* ───────── 三、印花、涂层、装饰件 ───────── */
+  {
+    id: 'print-crack',
+    name: '胶印/大面积印花开裂与翘边',
+    categories: ['T恤', '卫衣', '外套'],
+    requires_features: ['big_print'],
+    area: '前胸图案 / 图案边缘 / 跨越接缝处',
+    failure_modes: ['图案边角翘起', '弯折处出现细裂纹', '局部脱落'],
+    mechanism: '塑胶类印花是覆盖在面料上的膜层，其延展性与面料不一致；弯折、洗涤摩擦与高温会让膜层疲劳。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['图案近景（边缘是否平整）', '印花工艺说明', '耐洗/耐摩擦测试结果'],
+    mitigation: ['翻面洗涤、装洗衣袋', '不要用热水与烘干', '熨烫时避开图案或垫布低温'],
+    seller_questions: ['印花是胶印、发泡还是热转印？有耐洗测试结果吗？'],
+    verification: '沿图案边缘轻折，观察是否出现白痕或翘边。',
+    not_applicable: '刺绣、水浆印等无膜层工艺不适用。',
+    evidence_level: 'industry_practice',
+    sources: [SRC],
+    limitations: '印花的真实耐久性取决于浆料、固化条件与洗护，照片无法判断。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'print-on-stretch',
+    name: '弹力面料上的印花更易开裂',
+    categories: ['卫衣', '运动裤', 'T恤', '瑜伽/运动紧身衣'],
+    requires_features: ['print_any'],
+    any_features: ['stretch_fabric', 'high_spandex'],
+    area: '图案覆盖的高伸展区域',
+    failure_modes: ['拉伸处优先出现裂纹', '图案边缘与面料分离'],
+    mechanism: '弹性面料在穿着中反复伸展，膜层印花延展性不足时会在同一位置反复受拉。',
+    impact: 'medium',
+    likelihood_when_known: 'high',
+    evidence_needed: ['印花工艺', '面料弹性说明'],
+    mitigation: ['避免机洗强力甩干', '不要从图案处用力拉扯穿脱'],
+    seller_questions: ['弹力面料上的印花用的是弹性浆还是普通胶印？'],
+    verification: '在图案区域横向拉伸，观察是否出现细白纹。',
+    not_applicable: '无弹性的梭织面料不适用。',
+    evidence_level: 'industry_practice',
+    sources: [SRC],
+    limitations: '仅凭照片无法判断浆料类型。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'coating-peel',
+    name: '涂层/仿皮的弯折开裂与剥离',
+    categories: ['外套', '夹克', '大衣', '半身裙'],
+    requires_features: ['coating_faux_leather'],
+    area: '袖窿 / 肘部 / 口袋边缘 / 接缝处',
+    failure_modes: ['弯折处细裂纹', '表层剥离、起皮', '表面发黏或失去均匀质感'],
+    mechanism: '涂层与基布的热膨胀、柔韧性不同；反复弯折使界面产生疲劳，接缝边缘的摩擦会加速脱层。',
+    impact: 'high',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['涂层类型（PU/PVC/其他）', '近景观察是否已有细纹', '耐磨/耐折测试结果'],
+    mitigation: ['避免高温与暴晒', '不要用酒精等溶剂擦拭', '悬挂存放，避免长期折叠压痕'],
+    seller_questions: ['表面是 PU 涂层还是其他材料？有耐折/耐磨测试吗？'],
+    verification: '在肘部内侧轻折，观察是否有白色折痕或细裂。',
+    not_applicable: '真正的皮革（非涂层）与本条不同，需另判。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '图片无法确认化学材质，只能表述为"疑似涂层/仿皮结构"；也不能断言它会脱皮。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'embroidery-attach',
+    name: '刺绣/贴布/珠片的连接失效',
+    categories: [],
+    requires_features: ['embroidery_beads'],
+    area: '装饰区域 / 洗后摩擦区',
+    failure_modes: ['线头松散、绣线起毛', '贴布边缘翘起', '珠片/铆钉脱落', '连接处织物被拉破'],
+    mechanism: '装饰件把应力集中到少量缝线上；金属或硬质件还会磨损周围纱线，洗涤时容易勾挂。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['装饰件固定方式近景（内侧是否有加固）', '洗护说明'],
+    mitigation: ['装洗衣袋、翻面洗', '不要与针织/蕾丝同洗', '发现线头及时处理，避免继续脱散'],
+    seller_questions: ['珠片/装饰是缝制还是粘合？内侧有加固吗？'],
+    verification: '轻拨装饰件，观察是否有松动；翻看内侧是否有衬布。',
+    not_applicable: '印花/烫画类装饰不适用。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '看不清固定方式时不能断言牢固或易脱落。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'metal-hardware-wear',
+    name: '金属五金与拉链的磨损',
+    categories: ['外套', '夹克', '牛仔裤', '休闲裤'],
+    requires_features: ['metal_hardware'],
+    area: '门襟 / 拉链头 / 金属扣 / 铆钉',
+    failure_modes: ['镀层磨损、露出底色', '拉链卡顿或咬合不齐', '金属件边缘磨伤周围面料'],
+    mechanism: '金属件与面料硬度差异大，摩擦时面料先磨损；镀层厚度与拉头精度决定顺滑度与耐久。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['拉链品牌/型号', '金属件近景', '是否有防刮设计'],
+    mitigation: ['拉链拉到顶再穿脱，减少侧向拉扯', '定期用蜡或专用润滑', '洗涤前拉好拉链、扣好扣子'],
+    seller_questions: ['拉链是什么品牌/型号？金属件是否做过盐雾测试？'],
+    verification: '反复拉动拉链数次，感受是否顺滑、有无卡点。',
+    not_applicable: '塑料拉链、隐形拉链不适用镀层磨损部分。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '外观无法判断内部结构与镀层厚度。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'button-hole-loose',
+    name: '纽扣与扣眼的松动',
+    categories: ['衬衫', '外套', '西装', '大衣'],
+    text_regex: /(纽扣|扣眼|门襟)/,
+    area: '门襟 / 袖口',
+    failure_modes: ['扣眼变大、脱线', '纽扣缝线松脱', '扣位受力处面料撕裂'],
+    mechanism: '扣眼是面料被切开后的薄弱点，反复受力会扩大；纽扣缝线的收尾打结质量决定脱落概率。',
+    impact: 'low',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['门襟近景（扣眼锁边是否完整）', '纽扣背面缝线'],
+    mitigation: ['穿脱时解开扣子而不是硬拉', '发现线头及时加固'],
+    seller_questions: ['扣眼是否锁边处理？纽扣是几道线固定？'],
+    verification: '翻到内侧看纽扣缝线是否有打结与加固。',
+    not_applicable: '无纽扣的套头款不适用。',
+    evidence_level: 'industry_practice',
+    sources: [SRC],
+    limitations: '照片难以判断缝线牢固度。',
+    updated_at: UPDATED_AT
+  },
+
+  /* ───────── 四、品类专属的高磨损区域 ───────── */
+  {
+    id: 'jeans-crotch-thigh',
+    name: '牛仔裤裤裆与大腿内侧磨损',
+    categories: ['牛仔裤', '休闲裤'],
+    requires_features: ['woven_structure'],
+    area: '裤裆 / 大腿内侧 / 臀部',
+    failure_modes: ['大腿内侧先磨白', '裤裆缝线断裂', '弹力区域先变薄'],
+    mechanism: '行走时大腿内侧持续摩擦，牛仔斜纹虽耐磨，但同一位置反复受力后纱线会变细；含弹力的牛仔更易在摩擦处变薄。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['克重（越厚通常越耐磨）', '是否含氨纶及比例', '裤裆内侧缝线做工'],
+    mitigation: ['避免连续多天穿着同一件', '翻面洗、减少高温烘干', '发现变薄及时加固'],
+    seller_questions: ['面料克重是多少？是否含弹力？裤裆是单线还是双线缝合？'],
+    verification: '把裤子翻到内侧，看裤裆缝是否双道线并有加固。',
+    not_applicable: '裙装、短裤不适用。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '牛仔的褪色做旧是设计效果，不能与磨损混为一谈。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'pants-hem-knee',
+    name: '裤脚与膝盖的形状变化',
+    categories: ['牛仔裤', '休闲裤', '运动裤'],
+    area: '膝盖 / 裤脚',
+    failure_modes: ['膝盖处鼓包或变形', '裤脚边缘磨损起毛', '裤脚长短不一'],
+    mechanism: '膝盖在坐立中反复弯曲，纤维被拉伸后难以完全回复；裤脚直接接触地面与鞋面。',
+    impact: 'low',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['面料成分与弹性', '裤脚是否有包边'],
+    mitigation: ['避免长时间保持同一坐姿', '裤脚过长建议改短，减少拖地'],
+    seller_questions: ['裤脚是折边还是锁边？是否有加固？'],
+    verification: '查看裤脚内侧折边宽度与线迹密度。',
+    not_applicable: '九分裤/短裤不适用裤脚拖地部分。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '照片无法判断穿着者的使用习惯，可能性因人而异。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'coat-shoulder-armhole',
+    name: '外套/西装的肩部与袖窿变形',
+    categories: ['西装', '大衣', '风衣'],
+    area: '肩部 / 袖窿 / 袖肘 / 翻领',
+    failure_modes: ['肩部磨亮、起球', '袖窿处面料拉扯变形', '翻领边缘磨白', '内衬松脱'],
+    mechanism: '肩部承受衣身重量与背包摩擦；袖窿是曲面拼接，缝份与衬布决定形状保持；内衬与面料的缩率差异会导致松脱。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['是否有衬/粘合工艺说明', '内衬材质', '肩部近景'],
+    mitigation: ['使用合适的衣架（宽肩）', '避免长期背单肩包摩擦', '按标签干洗'],
+    seller_questions: ['肩部是有衬还是无衬结构？内衬是什么材质？'],
+    verification: '捏一下翻领与肩部，感受是否有衬布支撑。',
+    not_applicable: '针织外套不适用粘合衬部分。',
+    evidence_level: 'industry_practice',
+    sources: [SRC],
+    limitations: '粘合衬与定型工艺无法从外观判断，规范要求此处必须标"无法判断"。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'hoodie-cord-anchor',
+    name: '帽绳与帽子连接处的受力',
+    categories: ['卫衣'],
+    requires_features: ['drawstring_hood'],
+    area: '帽绳孔 / 帽子与衣身连接',
+    failure_modes: ['帽绳孔处面料撕裂', '帽绳端头磨损散开', '帽子与领口接缝拉长'],
+    mechanism: '帽绳孔是面料被冲孔后的薄弱点；帽子重量集中在领口几道缝线上。',
+    impact: 'low',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['帽绳孔是否有金属环/加固', '帽子缝合方式'],
+    mitigation: ['洗涤前取下帽绳或打结固定', '避免用力拽帽绳'],
+    seller_questions: ['帽绳孔有金属环加固吗？'],
+    verification: '轻拉帽绳，观察孔边缘是否变形。',
+    not_applicable: '无帽款不适用。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '无法判断长期使用后的具体表现。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'shirt-collar-wear',
+    name: '衬衫领口与袖口的磨损发白',
+    categories: ['衬衫'],
+    requires_features: ['woven_structure'],
+    area: '衣领 / 领座 / 袖口 / 门襟',
+    failure_modes: ['领口内侧磨白', '领座起皱变形', '袖口边缘磨损', '频繁熨烫处发亮'],
+    mechanism: '领口与皮肤、胡须、项链持续摩擦；领座内的衬布在反复洗涤与熨烫后失去挺度。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['领座是否有衬', '面料成分（浅色棉更易显磨白）', '是否免烫整理'],
+    mitigation: ['穿后及时洗涤，避免汗渍长期停留', '熨烫时垫布，避免直接高温压亮', '深浅分开洗'],
+    seller_questions: ['领座是有衬还是无衬？是否做过免烫整理？'],
+    verification: '翻看领座内侧是否有衬布层；观察领尖是否平整。',
+    not_applicable: '立领/无领款不适用。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '浅色棉的磨白属于常见使用痕迹，本工具不据此判定质量问题。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'sport-seam-strain',
+    name: '运动服的接缝与印花受力',
+    categories: ['瑜伽/运动紧身衣', '运动裤', '卫衣'],
+    requires_features: ['stretch_fabric'],
+    area: '肩缝 / 腋下 / 裆部 / 高伸展区',
+    failure_modes: ['接缝处跳线或开裂', '弹性减弱、包裹感下降', '反光/印花层脱落'],
+    mechanism: '高弹面料在运动中反复大幅伸展，普通平缝线的延展性不足，会在接缝处先失效。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['是否四针六线/包缝工艺', '氨纶比例', '是否有运动类检测'],
+    mitigation: ['避免高温洗涤与烘干（保护氨纶）', '不要与魔术贴/拉链同洗', '按运动强度轮换穿着'],
+    seller_questions: ['接缝用的是平缝还是四针六线？氨纶比例是多少？'],
+    verification: '横向拉伸接缝处，看线迹是否跟着伸展、有无发白。',
+    not_applicable: '无弹性的梭织运动外套不适用。',
+    evidence_level: 'industry_practice',
+    sources: [SRC],
+    limitations: '仅凭标注"含氨纶"不能推断耐久性。',
+    updated_at: UPDATED_AT
+  },
+
+  /* ───────── 通用：弹性、腰头、洗护负担、宣称 ───────── */
+  {
+    id: 'spandex-decay',
+    name: '弹性纤维的热老化与回弹衰减',
+    categories: ['牛仔裤', '运动裤', '瑜伽/运动紧身衣', '内衣', 'T恤'],
+    any_features: ['spandex_low', 'high_spandex'],
+    area: '腰部 / 膝部 / 臀部的弹力区域',
+    failure_modes: ['弹性逐步下降', '局部松垮（膝盖、腰部）', '面料变薄'],
+    mechanism: '氨纶在高温、氯（泳池）与长期拉伸下会降解，回弹力随之下降；比例越高，对洗护越敏感。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['氨纶比例', '洗护标签温度', '是否有回弹测试'],
+    mitigation: ['避免高温烘干与热水洗', '泳池后及时清水冲洗', '不要长期挂在窄衣架上拉伸'],
+    seller_questions: ['氨纶含量多少？是否做过回弹率测试？'],
+    verification: '拉伸后静置，观察回复速度与残留变形。',
+    not_applicable: '不含弹性纤维的商品不适用。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '无法预测具体衰减速度，只能提示影响因素。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'elastic-waist-relax',
+    name: '松紧腰头的松弛与卷边',
+    categories: ['休闲裤', '运动裤', '半身裙', '短裤'],
+    requires_features: ['elastic_waist'],
+    area: '腰头',
+    failure_modes: ['腰头变松', '橡筋扭转、卷边', '腰头布料起皱'],
+    mechanism: '橡筋在反复拉伸与热水中失去弹性；腰头通道内橡筋的固定方式决定是否扭转。',
+    impact: 'medium',
+    likelihood_when_known: 'medium',
+    evidence_needed: ['腰头是否有抽绳/多道橡筋', '洗护标签'],
+    mitigation: ['避免高温烘干', '洗涤时把腰头自然展开，不要卷成一团'],
+    seller_questions: ['腰头是几道橡筋？有抽绳吗？'],
+    verification: '拉伸腰头后松手，观察是否立即回弹、橡筋是否扭转。',
+    not_applicable: '纽扣/拉链腰头不适用。',
+    evidence_level: 'general_knowledge',
+    sources: [SRC],
+    limitations: '无法判断橡筋质量与具体寿命。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'dry-clean-burden',
+    name: '洗护成本与使用限制',
+    categories: [],
+    requires_features: ['dry_clean_only'],
+    area: '整体（使用与维护）',
+    failure_modes: ['需要频繁干洗、维护成本高', '自行水洗可能导致变形或缩水'],
+    mechanism: '干洗依赖来自面料对水与机械作用的敏感性，而不是耐久性问题。',
+    impact: 'low',
+    likelihood_when_known: 'high',
+    evidence_needed: ['洗护标签原文'],
+    mitigation: ['按标签送洗', '穿后通风，减少洗涤频次', '备一件替换以降低单件损耗'],
+    seller_questions: ['是否可以冷水手洗？水洗会有什么风险？'],
+    verification: '查看水洗标是否有"仅可干洗"。',
+    not_applicable: '可机洗商品不适用。',
+    evidence_level: 'observed_defect',
+    sources: ['商品洗护标签（已标注）'],
+    limitations: '成本提示不属于质量判断。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'claim-without-data',
+    name: '性能宣称缺少可核验依据',
+    categories: [],
+    requires_features: ['performance_claim'],
+    area: '面料性能（整体）',
+    failure_modes: ['宣称的性能无法验证', '实际表现可能与文案不符'],
+    mechanism: '抗起球、耐磨、防水等指标需要对应标准下的测试结果；页面文案不构成证据。',
+    impact: 'medium',
+    likelihood_when_known: 'unknown',
+    evidence_needed: ['检测报告编号与机构', '测试标准与结果'],
+    mitigation: ['以检测报告为准，不依赖文案'],
+    seller_questions: ['这项性能有检测报告吗？依据哪个标准、结果是多少？'],
+    verification: '索取报告首页（含编号、机构、样品、依据标准）与结论页。',
+    not_applicable: '无性能宣称的商品不适用。',
+    evidence_level: 'general_knowledge',
+    sources: ['消费者权益相关常识：宣传与检测是两件事'],
+    limitations: '本工具不判断宣称是否违法，只提示需要证据。',
+    updated_at: UPDATED_AT
+  },
+  {
+    id: 'existing-damage',
+    name: '图片/描述中已存在的损伤迹象',
+    categories: [],
+    requires_features: ['visible_defect'],
+    area: '见原文描述的位置',
+    failure_modes: ['已出现的起球/勾丝/开裂/开线/变形'],
+    mechanism: '这是**当前已经发生**的现象，与"未来可能发生"不同：需要判断是二手/样衣/瑕疵品，还是图片误读。',
+    impact: 'high',
+    likelihood_when_known: 'high',
+    evidence_needed: ['对应位置的清晰近景', '卖家说明（是否二手/瑕疵）'],
+    mitigation: ['要求卖家提供该位置的新照片', '确认退换政策'],
+    seller_questions: ['这里是否已有起球/开线/磨损？是全新品吗？'],
+    verification: '让卖家补拍该位置，并与商品主图对比。',
+    not_applicable: '无此类描述时不适用。',
+    evidence_level: 'observed_defect',
+    sources: ['商品文字描述本身'],
+    limitations: '文字可能描述的是"抗起球"等宣传语而非实际损伤，需结合上下文；本工具会同时给出两种可能。',
+    updated_at: UPDATED_AT
+  }
+];
+
+/** 品类 → 重点观察区域（用于"风险分布图"） */
+const CATEGORY_REGIONS = {
+  T恤: ['领口', '肩部', '袖口', '腋下', '前胸', '下摆'],
+  卫衣: ['领口', '帽绳孔', '袖口', '腋下', '前胸图案', '下摆'],
+  衬衫: ['衣领', '领座', '肩缝', '袖口', '门襟', '下摆'],
+  羊毛衫: ['领口', '肩部', '袖口', '腋下', '下摆'],
+  大衣: ['肩部', '袖窿', '翻领', '袖口', '口袋', '下摆', '内衬'],
+  西装: ['肩部', '袖窿', '翻领', '门襟', '口袋', '内衬'],
+  风衣: ['肩部', '袖口', '门襟', '腰带', '下摆'],
+  羽绒服: ['肩部', '袖口', '拉链', '口袋', '下摆'],
+  牛仔裤: ['腰部', '裤裆', '大腿内侧', '膝盖', '臀部', '裤脚', '口袋边缘'],
+  休闲裤: ['腰部', '裤裆', '膝盖', '裤脚', '口袋边缘'],
+  运动裤: ['腰部', '裤裆', '膝盖', '裤脚', '侧缝'],
+  半身裙: ['腰部', '拉链', '裙摆', '侧缝'],
+  连衣裙: ['领口', '肩部', '腋下', '腰部', '裙摆'],
+  '瑜伽/运动紧身衣': ['肩缝', '腋下', '胸部', '裆部', '接缝'],
+  内衣: ['肩带', '罩杯边缘', '下围', '搭扣'],
+  童装: ['领口', '袖口', '膝盖', '拉链', '装饰件']
+};
+
+module.exports = { RULES, CATEGORY_REGIONS, UPDATED_AT, SRC };
 
   };
   defs["core/compare.js"] = function (module, exports, require) {
@@ -4486,6 +5884,7 @@ module.exports = { DEMO_PRODUCTS, DEMO_PROFILE, findDemo };
     buildManualFields: req('core/manual-fields.js').buildManualFields,
     fields: req('core/fields.js'),
     fit: req('core/fit.js').assessFit,
+    buildWearReport: req('core/wear/analyze.js').buildWearReport,
     fabric: req('core/fabric.js'),
     evidence: req('core/evidence.js'),
     normalize: req('core/normalize.js'),

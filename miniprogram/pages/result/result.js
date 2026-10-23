@@ -97,6 +97,25 @@ Page({
                   : '信息不足'
         });
       }
+      if (s.key === 'wear') {
+        const toneOf = { high: 'alert', medium: 'warn', insufficient: 'muted', low: 'ok', none: 'muted' };
+        return Object.assign({}, s, {
+          items: (s.items || []).map((it) => ({
+            ...it,
+            tone: toneOf[it.overall_risk] || 'muted',
+            impact_tone: it.impact_level === 'high' ? 'alert' : it.impact_level === 'medium' ? 'warn' : 'muted',
+            confidence_tone: it.confidence_level === 'high' ? 'ok' : it.confidence_level === 'medium' ? 'info' : 'muted',
+            open: false
+          })),
+          regions: {
+            ...(s.regions || {}),
+            regions: ((s.regions && s.regions.regions) || []).map((r) => ({
+              ...r,
+              tone: toneOf[r.level] || 'muted'
+            }))
+          }
+        });
+      }
       return s;
     });
 
@@ -107,6 +126,7 @@ Page({
         standard: sections.find((s) => s.key === 'standard') || null,
         fabric: sections.find((s) => s.key === 'fabric') || null,
         fit: sections.find((s) => s.key === 'fit') || null,
+        wear: sections.find((s) => s.key === 'wear') || null,
         doubts: sections.find((s) => s.key === 'doubts') || null,
         care: sections.find((s) => s.key === 'care') || null
       },
@@ -241,6 +261,16 @@ Page({
     const key = e.currentTarget.dataset.key;
     const expanded = Object.assign({}, this.data.expanded, { [key]: !this.data.expanded[key] });
     this.setData({ expanded });
+  },
+
+  /** 展开/收起某条老化风险 */
+  toggleWearItem(e) {
+    const index = Number(e.currentTarget.dataset.index);
+    const wear = this.data.view.sec.wear;
+    if (!wear || !wear.items[index]) return;
+    const items = wear.items.slice();
+    items[index] = Object.assign({}, items[index], { open: !items[index].open });
+    this.setData({ 'view.sec.wear.items': items });
   },
 
   copyQuestions() {

@@ -18,6 +18,7 @@ const { assessWeight, assessYarnCount } = require('./fabric');
 const knowledge = require('./knowledge');
 const { assessFit } = require('./fit');
 const { computeCompleteness, buildDoubts } = require('./rules');
+const { buildWearReport } = require('./wear/analyze');
 
 const DISCLAIMER =
   '本卡基于你上传的图片做信息整理与规则提示，不是检测报告，也不构成质量、真伪或合规判定。' +
@@ -54,7 +55,8 @@ function buildReport(input) {
   const fabricNotes = knowledge.composeFabricNotes(fiberItems);
   const care = knowledge.explainCare(hasValue(fields.care_instructions) ? fields.care_instructions.normalized_value : '');
   const fit = assessFit({ fields, profile });
-  const doubts = buildDoubts({ fields, standard, weight, fit, completeness, rawText });
+  const wear = buildWearReport({ fields, rawText, profile });
+  const doubts = buildDoubts({ fields, standard, weight, fit, wear, completeness, rawText });
 
   const conclusion = buildConclusion({ fields, completeness, standard, doubts, weight, fit });
 
@@ -63,6 +65,7 @@ function buildReport(input) {
     standardSection(standard),
     fabricSection({ fields, weight, yarn, fabricNotes }),
     fitSection(fit),
+    wearSection(wear),
     doubtSection(doubts),
     careSection({ fields, care, fiberItems })
   ];
@@ -94,8 +97,9 @@ function buildReport(input) {
     doubts: doubts.items,
     doubt_counts: doubts.counts,
     questions: doubts.questions,
+    wear,
     evidence: buildEvidence(fields),
-    limits: buildLimits({ completeness, standard, weight, fit }),
+    limits: buildLimits({ completeness, standard, weight, fit, wear }),
     disclaimer: DISCLAIMER,
     standard,
     fit,
@@ -241,6 +245,27 @@ function fitSection(fit) {
   };
 }
 
+function wearSection(wear) {
+  return {
+    key: 'wear',
+    title: wear.title,
+    subtitle: wear.subtitle,
+    available: wear.available,
+    summary: wear.summary,
+    counts: wear.counts,
+    items: wear.items,
+    timeline: wear.timeline,
+    appearance: wear.appearance,
+    regions: wear.regions,
+    evidence_gaps: wear.evidence_gaps,
+    seller_questions: wear.seller_questions,
+    features: wear.features,
+    disclaimer: wear.disclaimer,
+    confidence_note: wear.confidence_note,
+    updated_at: wear.updated_at
+  };
+}
+
 function doubtSection(doubts) {
   return {
     key: 'doubts',
@@ -366,7 +391,7 @@ function buildEvidence(fields) {
   });
 }
 
-function buildLimits({ completeness, standard, weight, fit }) {
+function buildLimits({ completeness, standard, weight, fit, wear }) {
   const limits = [
     '只分析你上传的图片内容；图片没拍到的，系统不会补',
     '识别结果可能出错，标注"已识别"的字段也需要你对照原图复核',
@@ -377,6 +402,10 @@ function buildLimits({ completeness, standard, weight, fit }) {
   if (!standard.registry_match) limits.push('该标准号未在本地官方核验库中查到，状态未核验');
   if (weight.status !== 'reference_only') limits.push('没有可用的克重同类参考，未做厚薄评级');
   if (fit.status !== 'heuristic') limits.push('缺尺码表或个人尺寸，未给出具体尺码建议');
+  if (wear && wear.counts && wear.counts.insufficient > 0) {
+    limits.push(`老化风险中 ${wear.counts.insufficient} 项因缺少材料/结构/检测信息标为「证据不足」，这不等于低风险`);
+  }
+  limits.push('老化与耐久提示来自文字描述与通用工艺知识，没有做任何耐洗、耐磨、抗起球或色牢度测试');
   limits.push('本系统没有同类产品样本库，因此不提供"品质评分"或"性价比排名"');
   return limits;
 }

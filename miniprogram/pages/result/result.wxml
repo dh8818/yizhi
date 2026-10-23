@@ -169,6 +169,88 @@
     </view>
   </view>
 
+  <!-- 穿久了会怎么样？ -->
+  <view class="section">
+    <view class="section__head">
+      <view class="section__title">{{view.sec.wear.title}}</view>
+      <view class="section__sub">重点 {{view.sec.wear.counts.high}} · 中 {{view.sec.wear.counts.medium}} · 证据不足 {{view.sec.wear.counts.insufficient}}</view>
+    </view>
+    <view class="section__body">
+      <view class="wear-summary">{{view.sec.wear.summary}}</view>
+
+      <view class="sub-block">
+        <view class="h3">风险分布（示意）</view>
+        <view class="chip-wrap">
+          <view wx:for="{{view.sec.wear.regions.regions}}" wx:key="name" class="chip chip--{{item.tone}}">
+            <text class="chip__name">{{item.name}}</text>
+            <text class="chip__lv">{{item.level_label}}</text>
+          </view>
+        </view>
+        <view class="tiny faint">{{view.sec.wear.regions.note}}</view>
+      </view>
+
+      <view class="sub-block">
+        <view class="h3">风险条目（点开看依据）</view>
+        <view wx:for="{{view.sec.wear.items}}" wx:key="id" class="wear-item">
+          <view class="wear-item__head" bindtap="toggleWearItem" data-index="{{index}}">
+            <view class="wear-item__title">{{item.item_name}}</view>
+            <text class="tag tag-{{item.tone}}">{{item.overall_label}}</text>
+          </view>
+          <view class="wear-item__area tiny muted">{{item.garment_area}}</view>
+          <view wx:if="{{item.open}}" class="wear-item__body">
+            <view class="row"><view class="row__label">当前观察</view><view class="row__value tiny">{{item.observed_feature}}</view></view>
+            <view class="row"><view class="row__label">已知材料</view><view class="row__value tiny">{{item.identified_material}}</view></view>
+            <view class="row"><view class="row__label">结构/工艺</view><view class="row__value tiny">{{item.construction_feature}}</view></view>
+            <view class="row"><view class="row__label">潜在变化</view><view class="row__value tiny">{{item.possible_failure}}</view></view>
+            <view class="row"><view class="row__label">为什么会这样</view><view class="row__value tiny">{{item.mechanism}}</view></view>
+            <view class="row">
+              <view class="row__label">风险判断</view>
+              <view class="row__value tiny">可能性 {{item.likelihood_label}} · 影响 {{item.impact_label}} → <text class="strong">{{item.overall_label}}</text></view>
+            </view>
+            <view class="row">
+              <view class="row__label">判断置信</view>
+              <view class="row__value tiny"><text class="tag tag-{{item.confidence_tone}}">{{item.confidence_label}}</text></view>
+            </view>
+            <view wx:if="{{item.missing_information.length}}" class="row"><view class="row__label">还缺什么</view><view class="row__value tiny">{{item.missing_information}}</view></view>
+            <view wx:if="{{item.mitigation.length}}" class="row"><view class="row__label">降低风险</view><view class="row__value tiny">{{item.mitigation}}</view></view>
+            <view wx:if="{{item.seller_questions.length}}" class="row"><view class="row__label">可以问</view><view class="row__value tiny">{{item.seller_questions}}</view></view>
+            <view class="tiny faint">{{item.disclaimer}}</view>
+          </view>
+        </view>
+      </view>
+
+      <view class="sub-block">
+        <view class="h3">从新到旧（定性阶段）</view>
+        <view wx:for="{{view.sec.wear.timeline}}" wx:key="stage" class="tl">
+          <view class="tl__stage">{{item.stage}}</view>
+          <view class="tl__body">
+            <view class="tiny strong">{{item.title}}</view>
+            <view class="tiny muted">{{item.text}}</view>
+          </view>
+        </view>
+      </view>
+
+      <view class="sub-block">
+        <view class="h3">长期外观与搭配</view>
+        <view wx:for="{{view.sec.wear.appearance.style}}" wx:key="title" class="tiny">· <text class="strong">{{item.title}}</text>：{{item.text}}</view>
+        <view class="tiny muted mt8">{{view.sec.wear.appearance.durability_note}}</view>
+        <view class="tiny faint">{{view.sec.wear.appearance.disclaimer}}</view>
+      </view>
+
+      <view wx:if="{{view.sec.wear.evidence_gaps.length}}" class="sub-block">
+        <view class="h3">补充什么能提高可靠性</view>
+        <view wx:for="{{view.sec.wear.evidence_gaps}}" wx:key="what" class="gap">
+          <view class="tiny strong">{{item.what}}</view>
+          <view class="tiny muted">{{item.why}}</view>
+          <view class="tiny faint">{{item.how}}</view>
+        </view>
+      </view>
+
+      <view class="notice notice-muted mt12">{{view.sec.wear.disclaimer}}</view>
+      <view class="tiny faint">{{view.sec.wear.confidence_note}}</view>
+    </view>
+  </view>
+
   <!-- 疑点清单 -->
   <view class="section">
     <view class="section__head">

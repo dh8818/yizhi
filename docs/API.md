@@ -20,8 +20,10 @@
 ```json
 { "ok": true, "data": {
   "service": "yizhi-api", "version": "0.1.0",
-  "mode": "mock",                    // vision | mock | unconfigured
-  "vision_configured": false,
+  "mode": "mock",                    // 实际使用的 OCR provider；未配置时为 mock/unconfigured
+  "ocr_configured": false,
+  "ocr_provider": "ollama",          // ollama | openai_compat | baidu_ocr | mock
+  "ocr_fallback": "demo",
   "standards": 12,
   "standards_verified_at": "2026-10-23T06:30:17.461Z",
   "time": "2026-10-23T06:48:19.126Z"
@@ -29,6 +31,17 @@
 ```
 
 设置页的"测试连接"调的就是它。
+
+## GET /api/ocr/probe
+
+不消耗配额，只判断 OCR provider 的配置与连通性（Ollama 会检查模型是否已 pull；百度会走一次 OAuth）。
+
+```json
+{ "ok": true, "data": {
+  "provider": "ollama", "configured": true, "ok": true,
+  "detail": "Ollama 就绪，模型 qwen2.5vl:3b（本机已装 2 个）"
+} }
+```
 
 ---
 
@@ -68,6 +81,9 @@
               "limits": [ ... ], "disclaimer": "...",
               "standard": { "compliance": "not_assessed", "...": "..." },
               "fit": { "status": "heuristic", "recommended_size": "L" },
+              "wear": { "available": true, "counts": { "high": 0, "medium": 2, "insufficient": 1 },
+                        "items": [ { "id": "rib-collar-relax", "overall_risk": "insufficient", "confidence_level": "low", "...": "..." } ],
+                        "timeline": [ ... ], "regions": { ... }, "evidence_gaps": [ ... ] },
               "demo": true, "demo_label": "演示数据：...", "mode": "mock" },
   "notes": [ ... ]
 } }

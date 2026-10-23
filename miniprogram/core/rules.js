@@ -423,6 +423,28 @@ function buildDoubts(ctx) {
     });
   }
 
+  /* 14b. 老化风险：只在高风险时提示，避免与「穿久了会怎么样？」区块重复 */
+  const wear = ctx && ctx.wear;
+  if (wear && wear.available) {
+    const high = wear.items.filter((i) => i.overall_risk === 'high');
+    if (high.length) {
+      push({
+        id: 'wear-high-risk',
+        severity: 'attention',
+        category: '长期穿着',
+        title: `「${high[0].garment_area}」存在需要重点核实的老化风险：${high[0].item_name}`,
+        reason:
+          `${high[0].possible_failure}。` +
+          (high[0].evidence_level === 'observed_defect'
+            ? '这是图片/描述中**已经存在**的迹象，不是预测。'
+            : '这是基于已识别结构与材料的风险提示，不是实测结论。'),
+        basis: (high[0].evidence || []).map((e) => ({ type: 'feature', field_name: e.label, raw_text: e.text, status: 'extracted' })),
+        action: '看「穿久了会怎么样？」区块：那里写了成因、影响程度、判断置信度与补图/询问建议。',
+        question: (high[0].seller_questions && high[0].seller_questions[0]) || null
+      });
+    }
+  }
+
   /* 15. 其余关键字段缺失：只对没被上面具体规则覆盖的字段给一条通用提示 */
   const leftover = completeness.key_missing.filter((k) => !covered.has(k));
   if (leftover.length) {

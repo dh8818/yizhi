@@ -318,6 +318,8 @@
     }
     html += secWrap('版型与尺码', fit.status === 'heuristic' ? '按尺码表与偏好推算' : fit.status === 'chart_missing' ? '缺尺码表，未给尺码' : '信息不足', fitHtml);
 
+    html += renderWear(r.wear);
+
     /* 疑点 */
     var doubtsHtml = r.doubts.length
       ? r.doubts.map(function (d) {
@@ -382,6 +384,86 @@
     if (copyC) copyC.addEventListener('click', function () {
       copy(h.product_name + '\n' + h.conclusion + '\n（信息整理，非质量/真伪判定）', '结论已复制');
     });
+  }
+
+  /* 穿久了会怎么样？ */
+  function renderWear(wear) {
+    if (!wear) return '';
+    var tone = function (lv) {
+      if (lv === 'high') return 'alert';
+      if (lv === 'medium') return 'warn';
+      if (lv === 'low') return 'ok';
+      return 'muted';
+    };
+    var html = '';
+
+    html += '<div class="wear-summary">' + esc(wear.summary) + '</div>';
+
+    /* 区域分布 */
+    html += '<div style="margin-top:14px;font-weight:600;font-size:13.5px">风险分布（示意）</div>';
+    html += '<div class="chips">' + (wear.regions.regions || []).map(function (r) {
+      return '<span class="chip chip--' + tone(r.level) + '"><b>' + esc(r.name) + '</b><span>' + esc(r.level_label) + '</span></span>';
+    }).join('') + '</div>';
+    html += '<div class="tiny faint">' + esc(wear.regions.note) + '</div>';
+
+    /* 风险条目 */
+    html += '<div style="margin-top:16px;font-weight:600;font-size:13.5px">风险条目（点开看依据）</div>';
+    html += (wear.items || []).map(function (it, idx) {
+      var body =
+        wearRow('当前观察', it.observed_feature) +
+        wearRow('已知材料', it.identified_material) +
+        wearRow('结构/工艺', it.construction_feature) +
+        wearRow('潜在变化', it.possible_failure) +
+        wearRow('为什么会这样', it.mechanism) +
+        wearRow('风险判断', '可能性 ' + it.likelihood_label + ' · 影响 ' + it.impact_label + ' → ' + it.overall_label) +
+        wearRow('判断置信', it.confidence_label) +
+        (it.missing_information && it.missing_information.length ? wearRow('还缺什么', it.missing_information.join('、')) : '') +
+        (it.mitigation && it.mitigation.length ? wearRow('降低风险', it.mitigation.join('；')) : '') +
+        (it.seller_questions && it.seller_questions.length ? wearRow('可以问', it.seller_questions.join('；')) : '') +
+        '<div class="tiny faint" style="margin-top:6px">' + esc(it.disclaimer) + '</div>';
+
+      return '<details class="wear-item"' + (idx === 0 ? ' open' : '') + '>' +
+        '<summary><span class="wear-item__title">' + esc(it.item_name) + '</span>' +
+        '<span class="tag tag-' + tone(it.overall_risk) + '">' + esc(it.overall_label) + '</span>' +
+        '<span class="tiny muted" style="margin-left:8px">' + esc(it.garment_area) + '</span></summary>' +
+        body + '</details>';
+    }).join('');
+
+    /* 时间轴 */
+    html += '<div style="margin-top:16px;font-weight:600;font-size:13.5px">从新到旧（定性阶段）</div>';
+    html += '<div class="timeline">' + (wear.timeline || []).map(function (s) {
+      return '<div class="tl"><div class="tl__stage">' + esc(s.stage) + '</div>' +
+        '<div class="tl__body"><div class="tiny strong">' + esc(s.title) + '</div>' +
+        '<div class="tiny muted">' + esc(s.text) + '</div></div></div>';
+    }).join('') + '</div>';
+
+    /* 长期外观 */
+    html += '<div style="margin-top:16px;font-weight:600;font-size:13.5px">长期外观与搭配</div>';
+    html += (wear.appearance.style || []).map(function (s) {
+      return '<div class="tiny" style="margin-top:4px">· <span class="strong">' + esc(s.title) + '</span>：' + esc(s.text) + '</div>';
+    }).join('');
+    html += '<div class="tiny muted" style="margin-top:6px">' + esc(wear.appearance.durability_note) + '</div>';
+    html += '<div class="tiny faint">' + esc(wear.appearance.disclaimer) + '</div>';
+
+    /* 补图建议 */
+    if (wear.evidence_gaps && wear.evidence_gaps.length) {
+      html += '<div style="margin-top:16px;font-weight:600;font-size:13.5px">补充什么能提高可靠性</div>';
+      html += wear.evidence_gaps.map(function (g) {
+        return '<div class="gap"><div class="tiny strong">' + esc(g.what) + '</div>' +
+          '<div class="tiny muted">' + esc(g.why) + '</div>' +
+          '<div class="tiny faint">' + esc(g.how) + '</div></div>';
+      }).join('');
+    }
+
+    html += '<div class="notice notice-muted" style="margin-top:10px">' + esc(wear.disclaimer) + '</div>';
+    html += '<div class="tiny faint" style="margin-top:4px">' + esc(wear.confidence_note) + '</div>';
+
+    return secWrap('穿久了会怎么样？', '重点 ' + wear.counts.high + ' · 中 ' + wear.counts.medium + ' · 证据不足 ' + wear.counts.insufficient, html);
+  }
+
+  function wearRow(label, value) {
+    return '<div class="row"><div class="row__label">' + esc(label) + '</div>' +
+      '<div class="row__value tiny">' + esc(value) + '</div></div>';
   }
 
   function secWrap(title, sub, body) {

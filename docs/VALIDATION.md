@@ -1,7 +1,7 @@
 # 验收报告
 
 > 生成时间：2026-10-23（本机时区 UTC+08:00）
-> 环境：Windows 11 · Node v22.16.0 · npm 10.9.2 · Python 3.14.7 · 微信开发者工具**未安装**
+> 环境：Windows 11 · Node v22.16.0 · npm 10.9.2 · Python 3.14.7 · 微信开发者工具已安装（D:\微信web开发者工具）但**服务端口未开启**
 
 本报告只写**实际执行过的**结果。没有跑过的，会明确标成"未验证"。
 
@@ -30,7 +30,9 @@
 | 商品对比 | `pages/compare` | 2–3 件，12 个维度，结论挂偏好 |
 | 历史与收藏 | `pages/history` | 搜索、筛选、收藏、单条删除、清空、本地占用 |
 | 设置 | `pages/settings` | 模式切换、后端地址、连接测试、数据删除、隐私说明、模型边界、反馈、版本 |
-| 核心层 | `miniprogram/core/*`（19 个模块） | 字段证据模型、规范化、提取、证据合并、标准、知识、面料、规则、版型、报告、对比、结构校验、视觉适配器 |
+| 核心层 | `miniprogram/core/*`（23 个模块） | 字段证据模型、规范化、提取、证据合并、标准、知识、面料、规则、版型、报告、对比、结构校验、OCR 适配、老化风险 |
+| OCR 适配层 | `miniprogram/core/ai/providers.js` | ollama / openai 兼容 / 百度 OCR 三家 + `/api/ocr/probe` 探活 + `scripts/test-ocr.js` 单图调试 |
+| 老化风险 | `miniprogram/core/wear/*` | 18 类设计特征、26 条规则、likelihood×impact×confidence 模型、时间轴、区域分布、补图建议 |
 | 服务端 | `server/server.js` | 9 个接口、限流、AppID 白名单、请求体上限、JSON 落盘、模拟 OCR 显式标注 |
 | 标准核验脚本 | `scripts/verify-standards.js` | 真实抓取 openstd 检索+详情页，12 条中 10 条 `official_verified` |
 | 工程自检 | `scripts/self-check.js` | 页面四件套、组件路径、模块加载、数据集完整性、密钥扫描、`wx.request` 位置约束 |
@@ -40,8 +42,8 @@
 
 ```
 $ npm test
-# tests 85
-# pass 85
+# tests 120
+# pass 120
 # fail 0
 ```
 
@@ -54,6 +56,8 @@ $ npm test
 | `tests/report.test.js` (10) | 结构校验、区块顺序、无"符合"结论、演示标记、结论措辞随完整度变化、价格来源约束、对比（<2 件拒绝、>3 件截断、偏好绑定、缺失不当差评） |
 | `tests/openstd-parse.test.js` (6) | 真实页面快照：列表解析、EN 行不覆盖中文行、废止状态、详情字段不串行、不编造 scope、状态归一化 |
 | `tests/api.test.js` (15) | 真实 HTTP：健康检查、创建分析、取回、字段修正（保留原值）、空值拒绝、无输入拒绝、模拟 OCR 标注、坏 JSON、标准/知识库/对比、删除、404 结构 |
+| `tests/ocr-providers.test.js` (13) | 真实 HTTP stub：ollama 逐张请求、openai 兼容多图 data URL、百度 token+form+words_result、401/超时/模型不存在/错误码、auto 优先级、mock 不假装成功 |
+| `tests/wear.test.js` (22) | 规范 §13 的 14 个案例（罗纹领口/胶印/仿皮/绒面/深色牛仔/浅色衬衫/紧身裤/珠片/五金/拼接/只有主图/宣称无资料/已存在损伤/只有成分）+ 18 字段完整性 + 禁寿命概率 + 区域不吞条目 + 总结不重复 |
 | `tests/services.test.js` (7) | 用最小 `wx` mock 跑通页面真实调用：无输入时拒绝、示例跑通并写历史、纯手填出卡、字段修正保留原值、删除/清空真的生效、设置不含密钥 |
 
 ```
@@ -78,6 +82,15 @@ $ node scripts/eval-fields.js
   safety_category    3/3
   care_present       3/3
 总计 21/21（样例 n=3，均为模拟 OCR 文本，不代表真实截图准确率）
+```
+
+OCR 适配层（13 个用例，真实 HTTP stub，不是 mock 模块）：
+
+```
+ollama        → 逐张请求、message.images 带 base64、模型缺失给出 ollama pull 提示、非 JSON 被拒
+openai_compat → /chat/completions、data URL、Bearer 鉴权、401 提示、超时识别为 OCR_TIMEOUT
+baidu_ocr     → oauth 换 token、表单提交、words_result 解析、空行丢弃、error_code 原样透出
+配置解析     → auto 优先级（百度 > OpenAI 兼容 > Ollama）、显式指定、缺项不计 configured
 ```
 
 服务端真实进程验证（`node server/server.js` + curl）：
@@ -159,7 +172,7 @@ yizhi-core.js（188,523 字节）  → HTTP 200，window.YizhiCore 可加载
 
 ## 九、结论
 
-- **能跑**：核心链路（提取 → 证据 → 规则 → 报告 → 对比）在 Node 下 85 个测试全绿，服务端真实起进程可访问；
+- **能跑**：核心链路（提取 → 证据 → 规则 → 报告 → 对比）在 Node 下 120 个测试全绿，服务端真实起进程可访问；
 - **能看**：9 个页面的代码、样式、交互齐全，工程自检通过，但**没在微信编译器里编译过**；
 - **不吹**：标准只核验了真实抓到的那 10 条，其余一律"待核验"；没有检测数据时不给质量结论、不给准确率。
 

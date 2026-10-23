@@ -56,18 +56,10 @@ const CONFIG = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
-  // off = 未配置视觉模型时直接报错；demo = 用示例 OCR 数据跑通流程（结果标记 demo）
+  // off = 未配置 OCR 时直接报错；demo = 用示例文本替代（结果必须标 demo）
   ocrFallback: String(process.env.YIZHI_OCR_FALLBACK || 'demo').toLowerCase(),
-  vision: {
-    baseUrl: process.env.YIZHI_VISION_BASE_URL || '',
-    model: process.env.YIZHI_VISION_MODEL || '',
-    apiKey: process.env.YIZHI_VISION_API_KEY || '',
-    timeoutMs: Number(process.env.YIZHI_VISION_TIMEOUT_MS || 45000)
-  },
   version: '0.1.0'
 };
-
-const visionConfigured = Boolean(CONFIG.vision.baseUrl && CONFIG.vision.model && CONFIG.vision.apiKey);
 
 /* ───────────────── 依赖（复用小程序核心层） ───────────────── */
 
@@ -81,7 +73,10 @@ const { buildReport } = require(path.join(CORE, 'report'));
 const { buildComparison } = require(path.join(CORE, 'compare'));
 const { validateOcrPayload, validateReport } = require(path.join(CORE, 'schema'));
 const { findDemo } = require(path.join(CORE, 'data', 'demo.products'));
-const { callVision } = require(path.join(CORE, 'ai', 'vision'));
+const providers = require(path.join(CORE, 'ai', 'providers'));
+
+/** OCR 配置：provider 由 YIZHI_OCR_PROVIDER 决定（auto 时按已配置的凭据自动选） */
+const OCR = providers.resolveConfig(process.env);
 
 /* ───────────────── 极简 JSON 文件存储 ───────────────── */
 
@@ -193,33 +188,30 @@ async function resolveOcr(body) {
   const images = Array.isArray(body.images) ? body.images : [];
   if (!images.length) return { ok: false, error: { code: 'NO_IMAGES', message: '没有上传图片，也没有选择示例商品' } };
 
-  if (visionConfigured) {
-    const res = await callVision({ config: CONFIG.vision, images });
-    if (res.ok) {
-      const check = validateOcrPayload(res.ocr);
-      if (!check.ok) {
-        return { ok: false, error: { code: 'OCR_SCHEMA', message: '视觉模型输出未通过结构校验', detail: check.errors.slice(0, 5).map((e) => `${e.path}: ${e.message}`).join('; ') } };
-      }
-      return { ok: true, ocr: check.sanitized, demo: false };
+  const res = await providers.callOcr({ images, config: OCR });
+
+  if (res.ok) {
+    const check = validateOcrPayload(res.ocr);
+    if (!check.ok) {
+      return {
+        ok: false,
+        error: {
+          code: 'OCR_SCHEMA',
+          message: 'OCR 输出未通过结构校验',
+          detail: check.errors.slice(0, 5).map((e) => `${e.path}: ${e.message}`).join('; ')
+        }
+      };
     }
-    if (CONFIG.ocrFallback !== 'demo') return { ok: false, error: res.error };
-    return {
-      ok: true,
-      ocr: simulateOcr(images),
-      demo: true,
-      demoLabel: '模拟 OCR：视觉模型调用失败，已用示例文本代替（不是你的图片内容）',
-      warn: res.error
-    };
+    return { ok: true, ocr: check.sanitized, demo: false, provider: res.provider };
   }
 
+  // 配置了 provider 但失败：按 YIZHI_OCR_FALLBACK 决定报错还是降级（降级必须标 demo）
   if (CONFIG.ocrFallback !== 'demo') {
     return {
       ok: false,
-      error: {
-        code: 'OCR_NOT_CONFIGURED',
-        message: '服务端未配置视觉模型（YIZHI_VISION_*），且 OCR 降级被关闭',
-        detail: '配置 .env 中的 YIZHI_VISION_BASE_URL / YIZHI_VISION_MODEL / YIZHI_VISION_API_KEY，或把 YIZHI_OCR_FALLBACK 设为 demo'
-      }
+      error: Object.assign({}, res.error, {
+        detail: [res.error && res.error.detail, `provider=${res.provider}`, 'YIZHI_OCR_FALLBACK=off，不降级'].filter(Boolean).join(' | ')
+      })
     };
   }
 
@@ -227,7 +219,12 @@ async function resolveOcr(body) {
     ok: true,
     ocr: simulateOcr(images),
     demo: true,
-    demoLabel: '模拟 OCR：服务端未配置视觉模型，已用示例文本代替（不是你的图片内容）'
+    provider: res.provider,
+    demoLabel:
+      res.provider === 'mock'
+        ? '模拟 OCR：服务端未配置 OCR 提供方，已用示例文本代替（不是你的图片内容）'
+        : `模拟 OCR：${res.provider} 调用失败（${res.error && res.error.code}），已用示例文本代替（不是你的图片内容）`,
+    warn: res.error
   };
 }
 
@@ -256,8 +253,9 @@ async function createAnalysis(body) {
   const hasManual = Object.keys(manualFields).length > 0;
 
   const meta = {
-    mode: visionConfigured && !ocrRes.demo ? 'vision' : 'mock',
+    mode: ocrRes.demo ? 'mock' : ocrRes.provider || 'ocr',
     demo: Boolean(ocrRes.demo),
+    ocr_provider: ocrRes.provider || 'mock',
     images: (body.images || []).map((img) => ({ id: img.id, kind: img.kind })),
     analysis_id: `srv-${crypto.randomBytes(6).toString('hex')}`,
     created_at: nowIso()
@@ -309,12 +307,19 @@ async function handle(req, res) {
     return ok(res, {
       service: 'yizhi-api',
       version: CONFIG.version,
-      mode: visionConfigured ? 'vision' : CONFIG.ocrFallback === 'demo' ? 'mock' : 'unconfigured',
-      vision_configured: visionConfigured,
+      mode: OCR.configured ? OCR.provider : CONFIG.ocrFallback === 'demo' ? 'mock' : 'unconfigured',
+      ocr_configured: OCR.configured,
+      ocr_provider: OCR.provider,
+      ocr_fallback: CONFIG.ocrFallback,
       standards: Object.keys(standards.dataset.records || {}).length,
       standards_verified_at: standards.dataset.generated_at,
       time: nowIso()
     });
+  }
+
+  // 探活：不消耗配额，只判断 OCR provider 的配置与连通性
+  if (pathname === '/api/ocr/probe' && method === 'GET') {
+    return ok(res, await providers.probe(process.env));
   }
 
   if (!checkAppId(req)) {
@@ -455,7 +460,8 @@ if (require.main === module) {
   server.listen(CONFIG.port, CONFIG.host, () => {
     console.log(`[yizhi-api] v${CONFIG.version} listening on http://${CONFIG.host}:${CONFIG.port}`);
     console.log(`[yizhi-api] data dir: ${DATA_DIR}`);
-    console.log(`[yizhi-api] vision: ${visionConfigured ? 'configured' : 'NOT configured'} · ocr fallback: ${CONFIG.ocrFallback}`);
+    console.log(`[yizhi-api] ocr: provider=${OCR.provider} configured=${OCR.configured} · fallback=${CONFIG.ocrFallback}`);
+    if (OCR.provider === 'ollama') console.log(`[yizhi-api] ollama: ${OCR.ollama.host} model=${OCR.ollama.model}`);
     if (!CONFIG.allowedAppIds.length) console.log('[yizhi-api] AppID 白名单未开启（仅适合本地开发）');
   });
 }

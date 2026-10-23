@@ -25,10 +25,10 @@ test('三张演示卡都通过结构校验（含免责声明与边界）', () =>
   }
 });
 
-test('分析卡固定包含 8 类信息，且带证据清单', () => {
+test('分析卡固定包含 7 个区块，且带证据清单', () => {
   const report = reportOf('demo-tshirt', DEMO_PROFILE, false);
   const keys = report.sections.map((s) => s.key);
-  assert.deepEqual(keys, ['basic', 'standard', 'fabric', 'fit', 'doubts', 'care']);
+  assert.deepEqual(keys, ['basic', 'standard', 'fabric', 'fit', 'wear', 'doubts', 'care']);
   assert.ok(report.questions.length > 0);
   assert.ok(report.limits.length >= 4);
   assert.ok(report.disclaimer.includes('不是检测报告'));

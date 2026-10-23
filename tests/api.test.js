@@ -54,7 +54,8 @@ test('健康检查报告服务端能力', async () => {
   assert.equal(r.status, 200);
   assert.equal(r.body.ok, true);
   assert.equal(r.body.data.service, 'yizhi-api');
-  assert.equal(r.body.data.vision_configured, false);
+  assert.equal(r.body.data.ocr_configured, false);
+  assert.ok(['mock', 'ollama', 'openai_compat', 'baidu_ocr'].includes(r.body.data.ocr_provider));
   assert.ok(r.body.data.standards > 5);
   assert.ok(r.body.data.standards_verified_at);
 });

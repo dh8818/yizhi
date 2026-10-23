@@ -114,3 +114,87 @@
   font-size: 26rpx;
   line-height: 1.6;
 }
+
+/* ── 老化风险 ── */
+.wear-summary {
+  font-size: 26rpx;
+  line-height: 1.7;
+  color: #374151;
+  background: #f8faf9;
+  border-left: 6rpx solid #2f6f4f;
+  border-radius: 8rpx;
+  padding: 16rpx 18rpx;
+  margin-bottom: 8rpx;
+}
+
+.chip-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin: 10rpx 0;
+}
+
+.chip {
+  border: 1rpx solid #e5e7eb;
+  border-radius: 10rpx;
+  padding: 8rpx 12rpx;
+  display: flex;
+  flex-direction: column;
+  min-width: 150rpx;
+}
+
+.chip__name { font-size: 23rpx; font-weight: 600; }
+.chip__lv { font-size: 20rpx; margin-top: 2rpx; }
+
+.chip--alert { border-color: #f3d3cf; background: #fbeae8; }
+.chip--alert .chip__lv { color: #b42318; }
+.chip--warn { border-color: #f2dfc0; background: #fdf3e2; }
+.chip--warn .chip__lv { color: #a15c07; }
+.chip--ok { border-color: #cfe6d5; background: #e7f4ea; }
+.chip--ok .chip__lv { color: #1a7f37; }
+.chip--muted { background: #f5f6f7; }
+.chip--muted .chip__lv { color: #6b7280; }
+
+.wear-item {
+  border-bottom: 1rpx solid #f0f1f3;
+  padding: 16rpx 0;
+}
+.wear-item:last-child { border-bottom: none; }
+
+.wear-item__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.wear-item__title { font-size: 27rpx; font-weight: 600; flex: 1; min-width: 0; }
+.wear-item__area { margin-top: 4rpx; }
+.wear-item__body { margin-top: 10rpx; padding-top: 6rpx; border-top: 1rpx dashed #eef0f2; }
+
+.tl {
+  display: flex;
+  gap: 14rpx;
+  padding: 12rpx 0;
+  border-bottom: 1rpx dashed #eef0f2;
+}
+.tl:last-child { border-bottom: none; }
+
+.tl__stage {
+  flex: none;
+  width: 140rpx;
+  font-size: 22rpx;
+  color: #2f6f4f;
+  font-weight: 600;
+}
+
+.tl__body { flex: 1; min-width: 0; line-height: 1.6; }
+
+.gap {
+  padding: 10rpx 0;
+  border-bottom: 1rpx dashed #eef0f2;
+  line-height: 1.6;
+}
+.gap:last-child { border-bottom: none; }
+
+.mt8 { margin-top: 8rpx; }
