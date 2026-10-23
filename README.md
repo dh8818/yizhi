@@ -110,6 +110,19 @@ npm run api
 - 正式环境必须是 **https**，并在小程序后台配置 `request` 合法域名；
 - 开发阶段可在开发者工具「详情 → 本地设置」勾选「不校验合法域名」。
 
+### 本机 OCR 实测（免费、离线）
+
+```bash
+ollama pull qwen2.5vl:3b          # 3.2GB，本机已装
+export YIZHI_OCR_PROVIDER=ollama  # 或写进 .env
+npm run api
+node scripts/test-ocr.js 你的截图.png --kind promo_screenshot
+```
+
+在本机（CPU）实测：一张 760×1000 的商品页 → 11/11 行读出、15.7 秒；
+服务端 `POST /api/analyses` 走同一条链路约 8.7 秒，字段与结论全部来自真实识别（`demo:false`）。
+慢是 3B 模型在 CPU 上的正常表现；要更快就换云端视觉接口（Qwen-VL / GLM-4V / 豆包）或百度 OCR。
+
 ### 没有视觉模型时（模拟 OCR）
 
 默认 `YIZHI_OCR_FALLBACK=demo`：后端没配视觉模型时，用示例商品的文本块代替 OCR，

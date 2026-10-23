@@ -100,10 +100,23 @@ function normalizeModelOcr(parsed, images) {
 /**
  * Ollama 的 /api/chat 把 images 挂在一条 message 上，所以逐张请求：
  * 这样"哪张图产生哪些文本块"不会混。
+ *
+ * 为什么这里要"纯文本"而不是 JSON：
+ * 小参数视觉模型（3B 级）很难稳定输出嵌套 JSON，会截断或漏行。
+ * OCR 的本质只是"把字抄下来"，所以让模型一行一段地抄，再按行切成 blocks——
+ * 结构由我们自己给，模型只负责转录。
  */
 async function ocrWithOllama(images, cfg) {
   const out = { images: [] };
   const host = String(cfg.host || 'http://127.0.0.1:11434').replace(/\/$/, '');
+  const prompt = [
+    '把这张图片里所有可见的文字逐行抄下来。',
+    '要求：',
+    '1) 保持原样：数字、单位、百分比、标准号、价格都不要改写、不要补全；',
+    '2) 一行对应图片里的一行文字，不要合并、不要解释、不要总结；',
+    '3) 看不清的字写 ? ，不要猜测；',
+    '4) 只输出文字本身。'
+  ].join('\n');
 
   for (const img of images) {
     const res = await withTimeout(
@@ -115,11 +128,10 @@ async function ocrWithOllama(images, cfg) {
           body: JSON.stringify({
             model: cfg.model,
             stream: false,
-            format: 'json',
-            options: { temperature: 0 },
+            options: { temperature: 0, num_predict: 1024 },
             messages: [
-              { role: 'system', content: SYSTEM_PROMPT },
-              { role: 'user', content: `${USER_PROMPT}\n\n只输出一张图的结果，images 数组里只有一个元素，id 用 "${img.id}"。`, images: [img.base64] }
+              { role: 'system', content: '你是图片文字识别器，只做 OCR 转录，不做任何推断。' },
+              { role: 'user', content: prompt, images: [img.base64] }
             ]
           })
         }),
@@ -147,20 +159,39 @@ async function ocrWithOllama(images, cfg) {
     }
 
     const payload = await res.json().catch(() => null);
-    const content = payload && payload.message ? payload.message.content : '';
-    const parsed = extractJson(content || '');
-    if (!parsed.ok) {
-      return {
-        ok: false,
-        error: { code: 'OCR_UNSTRUCTURED', message: 'Ollama 输出不是约定的 JSON', detail: String(content || '').slice(0, 300) },
-        raw: content
-      };
+    const content = String((payload && payload.message && payload.message.content) || '').trim();
+    if (!content) {
+      out.images.push({ id: img.id, kind: img.kind, blocks: [] });
+      continue;
     }
-    const normalized = normalizeModelOcr(parsed.value, [img]);
-    if (!normalized.ok) return normalized;
-    // 单张请求里模型可能仍返回空数组
-    const one = normalized.ocr.images[0] || { id: img.id, kind: img.kind, blocks: [] };
-    out.images.push({ id: img.id, kind: img.kind, blocks: one.blocks || [] });
+
+    // 有些模型仍然会输出 JSON：能解析就按 JSON 归一化，否则按行切
+    const maybeJson = extractJson(content);
+    if (maybeJson.ok && maybeJson.value && (maybeJson.value.images || maybeJson.value.blocks)) {
+      const normalized = normalizeModelOcr(
+        maybeJson.value.images ? maybeJson.value : { images: [{ id: img.id, kind: img.kind, blocks: maybeJson.value.blocks }] },
+        [img]
+      );
+      if (normalized.ok) {
+        const one = normalized.ocr.images[0] || { blocks: [] };
+        out.images.push({ id: img.id, kind: img.kind, blocks: one.blocks || [] });
+        continue;
+      }
+    }
+
+    const blocks = content
+      .split(/\r?\n/)
+      .map((line) =>
+        line
+          .replace(/^[\s\-•*·|]+/, '')
+          .replace(/^\d+[.)、]\s*/, '')
+          .replace(/\s*\|$/, '')
+          .trim()
+      )
+      .filter((line) => line && !/^```/.test(line))
+      .map((line) => ({ text: line.slice(0, 500), confidence: null, box: null }));
+
+    out.images.push({ id: img.id, kind: img.kind, blocks });
   }
 
   if (!out.images.some((i) => i.blocks.length)) {

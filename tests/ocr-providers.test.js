@@ -97,11 +97,10 @@ test('ollama：逐张请求，图片以 base64 挂在 message.images 上', async
   assert.equal(seen.length, 2, '两张图应发两次请求');
   assert.equal(seen[0].model, 'qwen2.5vl:3b');
   assert.equal(seen[0].stream, false);
-  assert.equal(seen[0].format, 'json');
+  assert.equal(seen[0].format, undefined, '小模型不要求 JSON 输出');
+  assert.ok(seen[0].options.num_predict >= 512, '要给足输出长度，避免抄一半被截断');
   assert.ok(Array.isArray(seen[0].messages[1].images));
   assert.equal(seen[0].messages[1].images[0], PNG_BASE64);
-  // 第二张的 id 要传给模型，方便对齐
-  assert.match(seen[1].messages[1].content, /"b"/);
   // 返回的 id/kind 以客户端声明的为准
   assert.equal(res.ocr.images[1].id, 'b');
   assert.equal(res.ocr.images[1].kind, 'physical_label');
@@ -120,12 +119,27 @@ test('ollama：模型不存在时给出明确的拉取提示', async () => {
   await stub.close();
 });
 
-test('ollama：模型返回非 JSON 时不静默通过', async () => {
-  const stub = await startStub((req, res) => json(res, 200, { message: { content: '我看到一件衣服' } }));
+test('ollama：纯文本逐行输出也会被切成 blocks（小模型不必守 JSON）', async () => {
+  const stub = await startStub((req, res) =>
+    json(res, 200, {
+      message: { content: '1. 纯棉短袖T恤\n2、面料：棉 100%\n- 执行标准 GB/T 22849-2024\n\n| 克重：190g/m² |' }
+    })
+  );
+  const cfg = providers.resolveConfig({ YIZHI_OCR_PROVIDER: 'ollama', YIZHI_OLLAMA_HOST: stub.base, YIZHI_OLLAMA_MODEL: 'x' });
+  const res = await providers.callOcr({ images: [{ id: 'a', kind: 'promo_screenshot', base64: PNG_BASE64 }], config: cfg });
+  assert.equal(res.ok, true);
+  const texts = res.ocr.images[0].blocks.map((b) => b.text);
+  assert.deepEqual(texts, ['纯棉短袖T恤', '面料：棉 100%', '执行标准 GB/T 22849-2024', '克重：190g/m²']);
+  assert.equal(res.ocr.images[0].blocks[0].confidence, null, '纯文本转录不给假置信度');
+  await stub.close();
+});
+
+test('ollama：完全没有输出时报 OCR_EMPTY，而不是返回空卡', async () => {
+  const stub = await startStub((req, res) => json(res, 200, { message: { content: '   ' } }));
   const cfg = providers.resolveConfig({ YIZHI_OCR_PROVIDER: 'ollama', YIZHI_OLLAMA_HOST: stub.base, YIZHI_OLLAMA_MODEL: 'x' });
   const res = await providers.callOcr({ images: [{ id: 'a', kind: 'promo_screenshot', base64: PNG_BASE64 }], config: cfg });
   assert.equal(res.ok, false);
-  assert.equal(res.error.code, 'OCR_UNSTRUCTURED');
+  assert.equal(res.error.code, 'OCR_EMPTY');
   await stub.close();
 });
 

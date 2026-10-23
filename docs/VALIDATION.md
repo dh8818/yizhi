@@ -93,6 +93,23 @@ baidu_ocr     → oauth 换 token、表单提交、words_result 解析、空行�
 配置解析     → auto 优先级（百度 > OpenAI 兼容 > Ollama）、显式指定、缺项不计 configured
 ```
 
+真实 OCR 端到端（本机 Ollama + qwen2.5vl:3b，2026-10-23 实测）：
+
+```
+node scripts/test-ocr.js .tmp/product-page.png --kind promo_screenshot
+  → ollama 返回 15.7s
+  → 11/11 行全部读出（商品名/价格/成分/克重/标准号/安全类别/版型/尺码/洗护/到手价）
+  → 提取字段 8/9 正确（尺码表 missing，因为图片里确实没有尺码表 —— 这是正确行为）
+  → 结论：「…执行标准 GB/T 22849-2024 在官方平台可查，状态为现行…」完整度 70%
+
+服务端同一条链路（POST /api/analyses，图片 base64，8.7s）：
+  GET  /api/health      → ocr_provider=ollama, ocr_configured=true
+  GET  /api/ocr/probe   → ok=true「Ollama 就绪，模型 qwen2.5vl:3b（本机已装 2 个）」
+  POST /api/analyses    → 201, demo=false, mode=ollama
+                          名称/标准号/成分/克重全部来自真实 OCR
+                          老化风险命中 3 条：rib-collar-relax / cellulosic-shrinkage / knit-pilling
+```
+
 服务端真实进程验证（`node server/server.js` + curl）：
 
 ```
@@ -124,7 +141,8 @@ yizhi-core.js（188,523 字节）  → HTTP 200，window.YizhiCore 可加载
 | 真机调试、权限弹窗（相册/相机） | 同上 | 首次授权流程未实测 |
 | 分享卡片（`onShareAppMessage`） | 需要在真机或工具里预览 | 只返回标题与首页路径，不含个人数据 |
 | `wx.chooseMedia` 的 HEIC 转码行为 | 平台/机型相关 | 已按扩展名拒绝不支持格式并提示 |
-| 真实视觉模型调用 | 无 API Key、未配置 `YIZHI_VISION_*` | 适配器代码已写（OpenAI 兼容 + 超时 + 结构校验），但**没有真实调用记录** |
+| 真实电商截图的表现 | 目前只用本仓库生成的合成商品页做了 OCR 验证 | 未用真实 App 截图评测过；3B 模型对小字号、复杂排版可能漏行 |
+| 云端 OCR（OpenAI 兼容 / 百度） | 没有对应密钥 | 只测过协议与错误处理（stub），未发过真实请求 |
 | 后端模式在真机上的连通性 | 需局域网 IP + 域名白名单 | 设置页与 README 都写了配置步骤 |
 
 ## 五、暂未实现
@@ -157,7 +175,9 @@ yizhi-core.js（188,523 字节）  → HTTP 200，window.YizhiCore 可加载
 6. **服务端无鉴权体系**：只有可选 AppID 头 + 限流，**不能直接暴露在公网**。
 7. **历史里的图片会失效**：只存了临时路径；要长期保留需转存 `USER_DATA_PATH` 或对象存储。
 8. **对比只在同一台设备**：依赖本地历史，删了就没了。
-9. **`wx.request` 无法打开外部网页**：官方查询链接用"复制 + 提示到浏览器打开"的方式，不是内嵌浏览器（`web-view` 需要业务域名）。
+9. **本机 OCR 的速度**：qwen2.5vl:3b 在 CPU 上单张约 9–16 秒（GPU 会快很多）。要更快，用云端视觉接口或百度 OCR。
+10. **3B 模型的转录边界**：小字号、竖排、花哨排版可能漏行或错字；它只读"看得清的字"，不补不猜。
+11. **`wx.request` 无法打开外部网页**：官方查询链接用"复制 + 提示到浏览器打开"的方式，不是内嵌浏览器（`web-view` 需要业务域名）。
 
 ## 八、需要人工核验的数据
 
