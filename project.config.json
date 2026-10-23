@@ -1,0 +1,26 @@
+{
+  "description": "衣知 — 服装信息识别与选衣决策小程序",
+  "miniprogramRoot": "miniprogram/",
+  "compileType": "miniprogram",
+  "appid": "touristappid",
+  "projectname": "yizhi",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true,
+    "lazyloadPlaceholderEnable": false,
+    "useCompilerPlugins": false
+  },
+  "libVersion": "3.5.5",
+  "condition": {},
+  "packOptions": {
+    "ignore": [
+      { "type": "folder", "value": "docs" },
+      { "type": "folder", "value": "tests" },
+      { "type": "folder", "value": "server" },
+      { "type": "folder", "value": "scripts" }
+    ]
+  }
+}

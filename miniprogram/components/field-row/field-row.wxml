@@ -1,0 +1,23 @@
+<view class="row">
+  <view class="row__label">{{item.label}}</view>
+  <view class="row__value">
+    <block wx:if="{{item.value}}">
+      <text class="value-text">{{item.value}}</text>
+    </block>
+    <block wx:else>
+      <text class="faint">{{item.placeholder || '未提供'}}</text>
+    </block>
+    <view class="value-meta">
+      <status-tag status="{{item.status}}" label="{{item.status_label}}" />
+      <text wx:if="{{item.source}}" class="tiny faint src">来源：{{item.source}}</text>
+    </view>
+    <view wx:if="{{item.note}}" class="tiny note">{{item.note}}</view>
+    <view wx:if="{{item.alternatives && item.alternatives.length}}" class="tiny alt">另有 {{item.alternatives.length}} 条来源记录</view>
+  </view>
+  <view class="row__side">
+    <text wx:if="{{item.raw_text && item.raw_text !== item.value}}" class="tiny faint" bindtap="onShowRaw">原文</text>
+  </view>
+</view>
+<view wx:if="{{showEdit}}" class="edit-line">
+  <text class="tiny accent" bindtap="onEdit">识别有误？手动修正</text>
+</view>

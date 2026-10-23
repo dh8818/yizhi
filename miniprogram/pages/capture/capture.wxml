@@ -1,0 +1,99 @@
+<view class="page">
+  <view wx:if="{{mode === 'local'}}" class="notice notice-info">
+    <view class="notice__title">本地演示模式</view>
+    本机不做真实 OCR。你可以选择下面的示例商品体验完整流程，或手动填写关键参数；
+    想识别自己的截图，请到<text class="link" bindtap="goSettings">设置</text>切换到后端模式。
+  </view>
+
+  <view class="section">
+    <view class="section__head">
+      <view class="section__title">图片</view>
+      <view class="section__sub">{{images.length}} / 9 张</view>
+    </view>
+    <view class="section__body">
+      <view wx:if="{{images.length === 0}}" class="uploader" bindtap="addImages">
+        <view class="uploader__title">＋ 选择图片</view>
+        <view class="uploader__hint">相册或拍照；支持 jpg/png/webp，单张 ≤ 5MB</view>
+        <view class="uploader__hint">首张建议商品详情页；再补吊牌、水洗标、尺码表更完整</view>
+      </view>
+
+      <view wx:else class="thumbs">
+        <view wx:for="{{images}}" wx:key="id" class="thumb">
+          <image class="thumb__img" src="{{item.path}}" mode="aspectFill" bindtap="previewImage" data-index="{{index}}" />
+          <view class="thumb__remove" catchtap="removeImage" data-index="{{index}}">×</view>
+          <picker range="{{kindLabels}}" bindchange="changeKind" data-index="{{index}}">
+            <view class="thumb__meta">{{item.kindLabel}} ▾</view>
+          </picker>
+        </view>
+        <view class="thumb thumb--add" bindtap="addImages">
+          <view class="thumb__add">＋</view>
+        </view>
+      </view>
+
+      <view wx:if="{{images.length > 0}}" class="tiny muted mt">
+        图片来源不同，证据效力也不同：实物吊牌/水洗标 ＞ 尺码表 ＞ 商品宣传页 ＞ 实物照片。
+        系统会分别标注，冲突时保留两侧证据。
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section__head">
+      <view class="section__title">示例商品</view>
+      <view class="section__sub">演示数据</view>
+    </view>
+    <view class="section__body">
+      <view wx:for="{{demos}}" wx:key="id" class="demo {{demoId === item.id ? 'demo--on' : ''}}" bindtap="pickDemo" data-id="{{item.id}}">
+        <view class="demo__label">{{item.label}}</view>
+        <view class="demo__summary tiny">{{item.summary}}</view>
+      </view>
+      <view wx:if="{{demoId}}" class="tiny warn mt">已选择示例：分析结果会标注「演示数据」。</view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section__head">
+      <view class="section__title">手动填写（可选）</view>
+      <view class="section__sub" bindtap="toggleManual">{{showManual ? '收起' : '展开'}}</view>
+    </view>
+    <view wx:if="{{showManual}}" class="section__body">
+      <view class="tiny muted">你填写的字段会标记为「已确认 / 你填写」，不会被当成图片识别结果。</view>
+      <view wx:for="{{manualFields}}" wx:key="key" class="field">
+        <view class="field__label">{{item.label}}</view>
+        <input class="input" type="{{item.type}}" placeholder="{{item.placeholder}}" value="{{manual[item.key]}}" bindinput="onManualInput" data-key="{{item.key}}" />
+      </view>
+      <view class="tiny faint mt">没有的字段留空即可，系统不会推测。</view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section__head">
+      <view class="section__title">个人资料</view>
+    </view>
+    <view class="section__body">
+      <view class="tiny muted">
+        {{savedProfile ? '已填写个人资料，会参与版型与尺码建议。' : '尚未填写身材资料；不填也能分析，只是不给具体尺码建议。'}}
+      </view>
+      <view class="btn btn-sm btn-ghost mt" bindtap="goProfile">{{savedProfile ? '修改身材与偏好' : '填写身材与偏好（可选）'}}</view>
+    </view>
+  </view>
+
+  <view wx:if="{{error}}" class="notice notice-alert">
+    <view class="notice__title">{{error.message}}</view>
+    <view wx:if="{{error.detail}}" class="tiny pre-wrap">{{error.detail}}</view>
+  </view>
+
+  <view wx:if="{{analyzing}}" class="card">
+    <view class="progress"><view class="progress__bar" style="width: {{progress}}%"></view></view>
+    <view class="tiny muted">{{step}} …</view>
+  </view>
+
+  <view class="btn btn-primary btn-block {{analyzing ? 'is-busy' : ''}}" bindtap="startAnalyze" disabled="{{analyzing}}">
+    {{analyzing ? '分析中…' : '开始分析'}}
+  </view>
+
+  <view class="footer-note">
+    上传前请确认：图片会留在本机（本地模式）；后端模式下会发送到你配置的服务端。
+    不要上传包含身份证、手机号等无关个人信息的截图。
+  </view>
+</view>

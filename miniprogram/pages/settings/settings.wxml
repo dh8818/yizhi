@@ -1,0 +1,103 @@
+<view class="page">
+  <view class="section">
+    <view class="section__head"><view class="section__title">运行模式</view></view>
+    <view class="section__body">
+      <view class="mode-row">
+        <view class="mode {{mode === 'local' ? 'mode--on' : ''}}" bindtap="setMode" data-mode="local">
+          <view class="mode__title">本地模式</view>
+          <view class="mode__desc">不联网、不做真实 OCR；示例商品与手填字段可完整跑通规则流程</view>
+        </view>
+        <view class="mode {{mode === 'remote' ? 'mode--on' : ''}}" bindtap="setMode" data-mode="remote">
+          <view class="mode__title">后端模式</view>
+          <view class="mode__desc">图片上传到你配置的服务端，由服务端决定 OCR/模型走真实还是模拟</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section__head"><view class="section__title">后端地址</view><view class="section__sub">仅后端模式使用</view></view>
+    <view class="section__body">
+      <input class="input" value="{{apiBase}}" placeholder="http://127.0.0.1:8787" bindinput="onApiInput" />
+      <view class="btn-row mt12">
+        <view class="btn btn-sm btn-ghost" bindtap="saveApi">保存地址</view>
+        <view class="btn btn-sm" bindtap="checkHealth">{{checking ? '检测中…' : '测试连接'}}</view>
+        <view class="btn btn-sm" bindtap="resetApi">恢复默认</view>
+      </view>
+      <view wx:if="{{health}}" class="notice {{health.ok ? 'notice-ok' : 'notice-alert'}} mt12 tiny">{{health.text}}</view>
+      <view class="tiny faint mt8">
+        真机调试时不能用 127.0.0.1（那是手机自己）。请填电脑的局域网 IP，并在小程序后台把该域名加入 request 合法域名；
+        开发阶段可在开发者工具里勾选"不校验合法域名"。
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section__head"><view class="section__title">我的数据</view></view>
+    <view class="section__body">
+      <view class="row"><view class="row__label">分析记录</view><view class="row__value">{{historyCount}} 条</view></view>
+      <view class="row"><view class="row__label">身材资料</view><view class="row__value">{{profileSaved ? '已填写' : '未填写'}}</view></view>
+      <view class="row"><view class="row__label">本地占用</view><view class="row__value">{{usageText}}</view></view>
+      <view class="btn-row mt12">
+        <view class="btn btn-sm" bindtap="clearHistory">清空记录</view>
+        <view class="btn btn-sm" bindtap="clearProfile">删除身材资料</view>
+      </view>
+      <view class="btn btn-danger btn-block mt12" bindtap="clearAll">删除我的全部数据</view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section__head">
+      <view class="section__title">隐私与数据处理</view>
+      <view class="section__sub" bindtap="toggle" data-key="privacyOpen">{{privacyOpen ? '收起' : '展开'}}</view>
+    </view>
+    <view wx:if="{{privacyOpen}}" class="section__body">
+      <view class="tiny muted">
+        · 本地模式：图片与文字分析全部在本机完成，不上传。<br />
+        · 后端模式：图片会发送到你配置的服务端；服务端是否调用第三方视觉模型取决于其 .env 配置。<br />
+        · 不做账号体系，不跨设备同步；卸载或清除数据即删除。<br />
+        · 不把上传图片用于模型训练。<br />
+        · 请在截图前遮盖身份证号、手机号、地址等与商品无关的个人信息。
+      </view>
+      <view class="btn btn-sm btn-ghost mt12" bindtap="copyPolicy">复制完整说明</view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section__head">
+      <view class="section__title">模型与分析边界</view>
+      <view class="section__sub" bindtap="toggle" data-key="modelOpen">{{modelOpen ? '收起' : '展开'}}</view>
+    </view>
+    <view wx:if="{{modelOpen}}" class="section__body">
+      <view class="tiny muted">
+        · 本地模式没有 OCR/视觉模型，只做规则与知识库计算；示例商品是人工构造的演示数据。<br />
+        · 后端模式若未配置视觉模型，服务端同样使用示例 OCR 数据，并在结果里标注"模拟模式"。<br />
+        · 本项目未建立校准测试集，因此不提供"准确率 95%/99%"之类的数字；置信度只是模型自评。<br />
+        · 标准状态来自 openstd.samr.gov.cn 的实时抓取，展示时带上核验时间；未抓到的条目一律标"待核验"。<br />
+        · 标准正文的范围与条款需人工查阅，系统不代填、不虚构。<br />
+        · 系统不做"符合标准""质量好坏""真假"的判断。
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section__head"><view class="section__title">问题反馈</view></view>
+    <view class="section__body">
+      <textarea class="textarea" value="{{feedback}}" placeholder="描述你遇到的问题：哪一步、看到什么、期望是什么" bindinput="onFeedback" maxlength="600" />
+      <view class="btn btn-sm btn-ghost mt12" bindtap="submitFeedback">保存并复制</view>
+      <view class="tiny faint mt8">当前没有接入反馈服务器：内容保存到本机并复制到剪贴板，由你自行发给开发者。</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="row"><view class="row__label">版本</view><view class="row__value">衣知 v{{version}}</view></view>
+    <view class="row"><view class="row__label">标准数据</view><view class="row__value tiny">{{datasetInfo}}</view></view>
+    <view class="row"><view class="row__label">知识库更新</view><view class="row__value tiny">{{knowledgeUpdated}}</view></view>
+    <view class="row"><view class="row__label">默认配置</view><view class="row__value tiny">模式 {{defaults.mode}} · 超时 {{defaults.requestTimeoutMs}}ms · 最多 {{defaults.maxImages}} 张</view></view>
+  </view>
+
+  <view class="footer-note">
+    衣知是信息整理工具，不是检测机构，也不提供法律或合规结论。
+    正式上线前需要完成隐私政策、用户协议与小程序类目审核。
+  </view>
+</view>

@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "历史与收藏",
+  "usingComponents": {
+    "status-tag": "../../components/status-tag/status-tag"
+  }
+}

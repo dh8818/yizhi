@@ -1,0 +1,60 @@
+<view class="page">
+  <view class="card">
+    <view class="h3">面料知识库</view>
+    <view class="tiny muted">
+      这里讲的是<text class="strong">纤维与织物的通用特性</text>，不是对这单件衣服的实测结论。
+      实际表现受纱线规格、织物密度、后整理和洗护方式影响。
+    </view>
+    <input class="input mt12" value="{{keyword}}" placeholder="搜索：棉 / 涤纶 / 针织 / 起球" bindinput="onInput" />
+  </view>
+
+  <view class="section">
+    <view class="section__head">
+      <view class="section__title">纤维与织物</view>
+      <view class="section__sub">{{entries.length}} 条</view>
+    </view>
+    <view class="section__body">
+      <view wx:if="{{entries.length === 0}}" class="empty">没有匹配的条目，换个关键词试试。</view>
+      <view wx:for="{{entries}}" wx:key="id" class="entry">
+        <view class="entry__head" bindtap="toggle" data-id="{{item.id}}">
+          <view class="entry__main">
+            <text class="entry__name">{{item.name}}</text>
+            <text class="tag tag-muted entry__kind">{{item.kindLabel}}</text>
+            <text wx:if="{{item.needs_review}}" class="tag tag-warn">待专业审校</text>
+          </view>
+          <text class="faint">{{expanded === item.id ? '−' : '+'}}</text>
+        </view>
+        <view class="entry__plain">{{item.plain}}</view>
+
+        <view wx:if="{{expanded === item.id}}" class="entry__detail">
+          <view class="tiny muted">定义：{{item.definition}}</view>
+          <view wx:if="{{item.common_uses.length}}" class="tiny">常见用途：{{item.common_uses}}</view>
+          <view wx:if="{{item.pros.length}}" class="tiny ok">可能优点：{{item.pros}}</view>
+          <view wx:if="{{item.cons.length}}" class="tiny warn">可能局限：{{item.cons}}</view>
+          <view wx:if="{{item.factors.length}}" class="tiny muted">影响实际表现的因素：{{item.factors}}</view>
+          <view wx:if="{{item.note_on_quality}}" class="tiny">{{item.note_on_quality}}</view>
+          <view class="tiny faint">来源：{{item.sources}}</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section__head">
+      <view class="section__title">洗护符号含义</view>
+      <view class="section__sub">仅解释符号</view>
+    </view>
+    <view class="section__body">
+      <view wx:for="{{careSymbols}}" wx:key="text" class="row">
+        <view class="row__label">{{item.text}}</view>
+        <view class="row__value tiny">{{item.meaning}}</view>
+      </view>
+      <view class="tiny faint">符号以商品水洗标上的实际图形为准，本表只做文字解释。</view>
+    </view>
+  </view>
+
+  <view class="footer-note">
+    {{disclaimer}}
+    知识库更新：{{updatedAt}}。内容来自公开纺织科普与行业通行解释，不含标准条款原文。
+  </view>
+</view>

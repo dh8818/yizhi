@@ -1,0 +1,85 @@
+<view class="page">
+  <view class="card hero">
+    <view class="hero__brand">衣知</view>
+    <view class="hero__title">买衣服之前，先把信息看懂</view>
+    <view class="hero__desc">
+      上传一张商品截图，系统会整理成分、克重、执行标准、版型与洗护信息，
+      并把"图片里有的""你填的""官方能查到的""系统推断的"分开标注。
+    </view>
+    <view class="hero__rule">
+      截图里没有的信息，不会替你补；缺什么，会明确告诉你缺什么。
+    </view>
+    <view class="btn btn-primary btn-block hero__cta" bindtap="goCapture">上传商品截图</view>
+    <view class="hero__sub" bindtap="goCapture" data-demo="demo-tshirt">没有截图？用示例商品体验完整流程 →</view>
+  </view>
+
+  <view wx:if="{{mode === 'local'}}" class="notice notice-info">
+    <view class="notice__title">当前是{{modeLabel}}</view>
+    不上传任何数据到服务器，也不做真实图片识别。示例商品与手动填写可以完整体验分析流程；
+    要识别真实截图，请到"设置"里切换到后端模式并启动本地服务。
+  </view>
+
+  <view class="card">
+    <view class="h3">继续使用</view>
+    <view wx:if="{{recent.length === 0}}" class="empty">
+      <view class="empty__title">还没有分析记录</view>
+      分析完成后会出现在这里，只保存在本机。
+    </view>
+    <view wx:for="{{recent}}" wx:key="id" class="recent" bindtap="openResult" data-id="{{item.id}}">
+      <view class="recent__main">
+        <view class="recent__name nowrap">{{item.name}}</view>
+        <view class="recent__meta tiny">
+          <text wx:if="{{item.category}}">{{item.category}} · </text>
+          <text>{{item.created_at}}</text>
+          <text wx:if="{{item.demo}}" class="tag tag-warn recent__tag">演示数据</text>
+        </view>
+        <view class="recent__conclusion">{{item.conclusion}}</view>
+      </view>
+      <view class="recent__side">
+        <status-tag status="{{item.level === 'high' ? 'official_verified' : item.level === 'medium' ? 'pending_verification' : 'missing'}}" label="{{item.level_label}}" />
+      </view>
+    </view>
+    <view wx:if="{{recent.length > 0}}" class="link-line" bindtap="goHistory">查看全部记录（含收藏 {{favoriteCount}}）→</view>
+  </view>
+
+  <view class="grid">
+    <view class="grid__item" bindtap="goCompare">
+      <view class="grid__title">商品对比</view>
+      <view class="grid__desc">2–3 件候选商品的成分、标准、版型与信息完整度并排看</view>
+    </view>
+    <view class="grid__item" bindtap="goKnowledge">
+      <view class="grid__title">面料知识</view>
+      <view class="grid__desc">纤维特性、织物组织与洗护要点（通用知识，非实测）</view>
+    </view>
+    <view class="grid__item" bindtap="goStandard">
+      <view class="grid__title">标准查询</view>
+      <view class="grid__desc">已核验 {{standardCount}} 条国标，核验日期 {{datasetDate}}</view>
+    </view>
+    <view class="grid__item" bindtap="goProfile">
+      <view class="grid__title">身材与偏好</view>
+      <view class="grid__desc">{{knowsProfile ? '已填写，可参与尺码建议' : '可选填写，用于版型与尺码判断'}}</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="h3">示例商品</view>
+    <view class="tiny muted">下面是内置的演示数据，用于在没有模型 API 时验证完整流程。</view>
+    <view wx:for="{{demoProducts}}" wx:key="id" class="demo-item" bindtap="goCapture" data-demo="{{item.id}}">
+      <view class="demo-item__label">{{item.label}}</view>
+      <view class="demo-item__summary tiny muted">{{item.summary}}</view>
+    </view>
+  </view>
+
+  <view class="card settings-entry" bindtap="goSettings">
+    <view>
+      <view class="h3">设置 · 隐私 · 反馈</view>
+      <view class="tiny muted">模式切换、数据删除、能力边界说明、版本信息</view>
+    </view>
+    <text class="faint">›</text>
+  </view>
+
+  <view class="footer-note">
+    衣知只做信息整理与规则提示，不是检测报告，也不构成质量、真伪或合规判定。
+    所有分析结果保存在本机，可随时在设置页删除。
+  </view>
+</view>

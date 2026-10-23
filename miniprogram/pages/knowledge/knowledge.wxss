@@ -1,0 +1,28 @@
+.mt12 { margin-top: 12rpx; }
+
+.entry {
+  padding: 18rpx 0;
+  border-bottom: 1rpx solid #f0f1f3;
+}
+
+.entry:last-child { border-bottom: none; }
+
+.entry__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.entry__main {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  flex-wrap: wrap;
+}
+
+.entry__name { font-size: 28rpx; font-weight: 600; }
+.entry__kind { font-size: 20rpx; }
+.entry__plain { font-size: 25rpx; color: #4b5563; margin-top: 6rpx; line-height: 1.6; }
+.entry__detail { margin-top: 12rpx; padding-top: 12rpx; border-top: 1rpx dashed #eef0f2; }
+.entry__detail .tiny { line-height: 1.7; }

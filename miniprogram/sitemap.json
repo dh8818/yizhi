@@ -1,0 +1,11 @@
+{
+  "desc": "衣知只索引用户主动访问的页面；分析结果页依赖本地数据，不参与搜索收录。",
+  "rules": [
+    { "action": "allow", "page": "pages/index/index" },
+    { "action": "allow", "page": "pages/knowledge/knowledge" },
+    { "action": "allow", "page": "pages/settings/settings" },
+    { "action": "disallow", "page": "pages/result/result" },
+    { "action": "disallow", "page": "pages/history/history" },
+    { "action": "disallow", "page": "pages/profile/profile" }
+  ]
+}
