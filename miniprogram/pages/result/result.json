@@ -1,7 +1,0 @@
-{
-  "navigationBarTitleText": "分析卡",
-  "usingComponents": {
-    "status-tag": "../../components/status-tag/status-tag",
-    "field-row": "../../components/field-row/field-row"
-  }
-}

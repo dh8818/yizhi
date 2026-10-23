@@ -1,9 +1,0 @@
-.check {
-  display: inline-flex;
-  align-items: center;
-  gap: 6rpx;
-  margin: 8rpx 16rpx 8rpx 0;
-}
-
-.center { text-align: center; margin-top: 10rpx; }
-.mt12 { margin-top: 12rpx; }

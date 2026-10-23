@@ -1,6 +1,0 @@
-{
-  "navigationBarTitleText": "标准查询",
-  "usingComponents": {
-    "status-tag": "../../components/status-tag/status-tag"
-  }
-}

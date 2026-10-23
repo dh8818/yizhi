@@ -1,6 +1,0 @@
-{
-  "navigationBarTitleText": "衣知",
-  "usingComponents": {
-    "status-tag": "../../components/status-tag/status-tag"
-  }
-}
